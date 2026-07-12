@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="480" viewBox="0 0 960 480" role="img" aria-labelledby="title desc">
+  <title id="title">Mojian Story Planner Star History</title>
+  <desc id="desc">GitHub Star history chart awaiting its first automated update.</desc>
+  <rect width="960" height="480" rx="18" fill="#faf8f3"/>
+  <text x="64" y="62" fill="#2b2723" font-family="system-ui, sans-serif" font-size="24" font-weight="700">Star History</text>
+  <text x="64" y="88" fill="#8a8378" font-family="system-ui, sans-serif" font-size="13">Starsrift/mojian-story-planner</text>
+  <line x1="86" y1="390" x2="910" y2="390" stroke="#d8cfbe" stroke-width="1.5"/>
+  <line x1="86" y1="116" x2="86" y2="390" stroke="#d8cfbe" stroke-width="1.5"/>
+  <path d="M86 390 L910 390" fill="none" stroke="#8b5e3c" stroke-width="3"/>
+  <circle cx="910" cy="390" r="5" fill="#8b5e3c"/>
+  <text x="498" y="260" text-anchor="middle" fill="#8a8378" font-family="system-ui, sans-serif" font-size="15">The chart will update automatically after the repository is published.</text>
+  <text x="498" y="438" text-anchor="middle" fill="#8a8378" font-family="system-ui, sans-serif" font-size="12">Date</text>
+  <text x="24" y="254" text-anchor="middle" transform="rotate(-90 24 254)" fill="#8a8378" font-family="system-ui, sans-serif" font-size="12">Cumulative stars</text>
+</svg>

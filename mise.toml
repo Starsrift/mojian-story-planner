@@ -1,0 +1,14 @@
+[tools]
+node = "24"
+
+[tasks.install]
+description = "Install project dependencies"
+run = "npm install"
+
+[tasks.dev]
+description = "Start the local development server"
+run = "npm run dev"
+
+[tasks.build]
+description = "Build the production bundle"
+run = "npm run build"
