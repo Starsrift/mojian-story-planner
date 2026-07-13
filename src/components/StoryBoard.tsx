@@ -580,6 +580,7 @@ export function StoryBoard() {
         zoomOnDoubleClick={false}
         deleteKeyCode={['Backspace', 'Delete']}
         fitView
+        fitViewOptions={{ maxZoom: 1 }}
         style={{ width: '100%', height: '100%' }}
       >
         <Background
