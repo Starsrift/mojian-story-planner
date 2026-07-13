@@ -17,6 +17,7 @@ import type { WikiEntry } from '../types'
 // ---------------------------------------------------------------------------
 
 type WikiType = WikiEntry['type']
+type SaveState = 'idle' | 'saving' | 'saved' | 'error'
 
 const TYPE_META: Record<
   WikiType,
@@ -33,6 +34,12 @@ const TYPE_META: Record<
 const TYPE_ORDER: WikiType[] = [
   'character', 'location', 'item', 'event', 'concept', 'organization',
 ]
+
+const parseCommaSeparated = (value: string) =>
+  value
+    .split(',')
+    .map((item) => item.trim())
+    .filter(Boolean)
 
 // ---------------------------------------------------------------------------
 // 样式
@@ -275,6 +282,13 @@ const detailFooter: CSSProperties = {
   borderTop: '1px solid var(--rule)',
 }
 
+const saveFeedback: CSSProperties = {
+  marginRight: 'auto',
+  alignSelf: 'center',
+  fontSize: 12,
+  color: 'var(--muted)',
+}
+
 const saveBtn: CSSProperties = {
   padding: '8px 20px',
   border: 'none',
@@ -313,6 +327,7 @@ export function WikiPanel() {
   const [editingAliases, setEditingAliases] = useState('')
   const [editingTags, setEditingTags] = useState('')
   const [editingContent, setEditingContent] = useState('')
+  const [saveState, setSaveState] = useState<SaveState>('idle')
 
   // ----- 当前选中的词条 -----
   const selectedEntry = useMemo(
@@ -330,6 +345,34 @@ export function WikiPanel() {
       setEditingContent(selectedEntry.content)
     }
   }, [selectedEntry])
+
+  useEffect(() => {
+    setSaveState('idle')
+  }, [selectedId])
+
+  const normalizedAliases = useMemo(
+    () => parseCommaSeparated(editingAliases),
+    [editingAliases],
+  )
+  const normalizedTags = useMemo(
+    () => parseCommaSeparated(editingTags),
+    [editingTags],
+  )
+  const hasChanges = Boolean(
+    selectedEntry && (
+      (editingName || '未命名') !== selectedEntry.name ||
+      editingType !== selectedEntry.type ||
+      normalizedAliases.join('\n') !== selectedEntry.aliases.join('\n') ||
+      normalizedTags.join('\n') !== selectedEntry.tags.join('\n') ||
+      editingContent !== selectedEntry.content
+    )
+  )
+
+  useEffect(() => {
+    if (hasChanges && saveState === 'saved') {
+      setSaveState('idle')
+    }
+  }, [hasChanges, saveState])
 
   // ----- 搜索过滤 -----
   const keyword = searchText.trim().toLowerCase()
@@ -387,21 +430,21 @@ export function WikiPanel() {
 
   // ----- 保存 -----
   const handleSave = useCallback(async () => {
-    if (!selectedId) return
-    await updateWikiEntry(selectedId, {
-      name: editingName || '未命名',
-      type: editingType,
-      aliases: editingAliases
-        .split(',')
-        .map((s) => s.trim())
-        .filter(Boolean),
-      tags: editingTags
-        .split(',')
-        .map((s) => s.trim())
-        .filter(Boolean),
-      content: editingContent,
-    })
-  }, [selectedId, editingName, editingType, editingAliases, editingTags, editingContent, updateWikiEntry])
+    if (!selectedId || !hasChanges || saveState === 'saving') return
+    setSaveState('saving')
+    try {
+      await updateWikiEntry(selectedId, {
+        name: editingName || '未命名',
+        type: editingType,
+        aliases: normalizedAliases,
+        tags: normalizedTags,
+        content: editingContent,
+      })
+      setSaveState('saved')
+    } catch {
+      setSaveState('error')
+    }
+  }, [selectedId, hasChanges, saveState, editingName, editingType, normalizedAliases, normalizedTags, editingContent, updateWikiEntry])
 
   // ----- 删除 -----
   const handleDelete = useCallback(() => {
@@ -576,11 +619,32 @@ export function WikiPanel() {
 
         {/* 底部操作 */}
         <div style={detailFooter}>
+          <span
+            style={{
+              ...saveFeedback,
+              color: saveState === 'error' ? 'var(--danger)' : saveState === 'saved' ? 'var(--success)' : 'var(--muted)',
+            }}
+            role="status"
+            aria-live="polite"
+          >
+            {saveState === 'saving' && '正在保存到本地…'}
+            {saveState === 'saved' && '✓ 已保存到本地'}
+            {saveState === 'error' && '保存失败，请重试'}
+            {saveState === 'idle' && hasChanges && '有未保存的修改'}
+          </span>
           <button style={deleteBtn} onClick={handleDelete}>
             删除词条
           </button>
-          <button style={saveBtn} onClick={handleSave}>
-            保存
+          <button
+            style={{
+              ...saveBtn,
+              opacity: !hasChanges || saveState === 'saving' ? 0.55 : 1,
+              cursor: !hasChanges || saveState === 'saving' ? 'not-allowed' : 'pointer',
+            }}
+            onClick={handleSave}
+            disabled={!hasChanges || saveState === 'saving'}
+          >
+            {saveState === 'saving' ? '保存中…' : saveState === 'error' ? '重试保存' : saveState === 'saved' ? '已保存' : '保存'}
           </button>
         </div>
       </>
