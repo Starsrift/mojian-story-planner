@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="960" height="480" viewBox="0 0 960 480" role="img" aria-labelledby="title desc">
   <title id="title">Starsrift/mojian-story-planner Star History</title>
-  <desc id="desc">0 cumulative GitHub stars as of 2026-07-12.</desc>
+  <desc id="desc">0 cumulative GitHub stars as of 2026-07-13.</desc>
   <rect width="960" height="480" rx="18" fill="#faf8f3"/>
   <text x="64" y="58" fill="#2b2723" font-family="system-ui, sans-serif" font-size="24" font-weight="700">Star History</text>
   <text x="64" y="84" fill="#8a8378" font-family="system-ui, sans-serif" font-size="13">Starsrift/mojian-story-planner</text>
@@ -17,7 +17,7 @@
   <line x1="580.4" y1="112" x2="580.4" y2="408" stroke="#eee8dc"/><text x="580.4" y="432" text-anchor="middle" fill="#8a8378" font-family="system-ui, sans-serif" font-size="11">2026-07-13</text>
   <line x1="745.2" y1="112" x2="745.2" y2="408" stroke="#eee8dc"/><text x="745.2" y="432" text-anchor="middle" fill="#8a8378" font-family="system-ui, sans-serif" font-size="11">2026-07-13</text>
   <line x1="910" y1="112" x2="910" y2="408" stroke="#eee8dc"/><text x="910" y="432" text-anchor="middle" fill="#8a8378" font-family="system-ui, sans-serif" font-size="11">2026-07-13</text>
-  <path d="M86.00 408.00 L86.17 408.00" fill="none" stroke="#8b5e3c" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
-  <circle cx="86.17457546296296" cy="408" r="5" fill="#c4683f" stroke="#faf8f3" stroke-width="3"/>
-  <text x="480" y="460" text-anchor="middle" fill="#8a8378" font-family="system-ui, sans-serif" font-size="11">Updated 2026-07-12 by GitHub Actions</text>
+  <path d="M86.00 408.00 L511.18 408.00" fill="none" stroke="#8b5e3c" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="511.1809958333333" cy="408" r="5" fill="#c4683f" stroke="#faf8f3" stroke-width="3"/>
+  <text x="480" y="460" text-anchor="middle" fill="#8a8378" font-family="system-ui, sans-serif" font-size="11">Updated 2026-07-13 by GitHub Actions</text>
 </svg>
