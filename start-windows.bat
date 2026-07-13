@@ -52,12 +52,12 @@ if errorlevel 1 (
 
 :MISE_READY
 echo.
-echo [2/4] 正在准备项目指定的 Node.js 24 环境...
+echo [2/4] 正在准备项目指定的 Node.js 24 与 Rust 环境...
 mise trust >nul 2>nul
 mise install
 if errorlevel 1 goto ENV_FAILED
 
-if exist node_modules (
+if exist node_modules\.bin\tauri.cmd if exist node_modules\.bin\vite.cmd if exist node_modules\.bin\tsc.cmd (
   echo.
   echo [3/4] 已检测到项目依赖，跳过安装。
 ) else (
@@ -67,11 +67,14 @@ if exist node_modules (
   if errorlevel 1 goto DEPS_FAILED
 )
 
+call :CHECK_MISE_RUST
+if errorlevel 1 goto RUST_HELP
+
 echo.
-echo [4/4] 启动开发服务器，浏览器将自动打开...
+echo [4/4] 启动墨笺桌面应用...
 echo 停止服务时，请回到此窗口按 Ctrl+C。
 echo.
-mise exec -- npm run dev -- --host 127.0.0.1 --open
+mise exec -- npm run desktop:dev
 if errorlevel 1 goto START_FAILED
 goto END
 
@@ -91,7 +94,7 @@ for /f "delims=" %%V in ('node --version') do set NODE_VERSION=%%V
 for /f "delims=" %%V in ('npm --version') do set NPM_VERSION=%%V
 echo 检测通过：Node.js %NODE_VERSION%，npm %NPM_VERSION%
 
-if exist node_modules (
+if exist node_modules\.bin\tauri.cmd if exist node_modules\.bin\vite.cmd if exist node_modules\.bin\tsc.cmd (
   echo.
   echo [3/4] 已检测到项目依赖，跳过安装。
 ) else (
@@ -101,11 +104,14 @@ if exist node_modules (
   if errorlevel 1 goto DEPS_FAILED
 )
 
+call :CHECK_RUST
+if errorlevel 1 goto RUST_HELP
+
 echo.
-echo [4/4] 启动开发服务器，浏览器将自动打开...
+echo [4/4] 启动墨笺桌面应用...
 echo 停止服务时，请回到此窗口按 Ctrl+C。
 echo.
-npm run dev -- --host 127.0.0.1 --open
+npm run desktop:dev
 if errorlevel 1 goto START_FAILED
 goto END
 
@@ -122,6 +128,14 @@ echo.
 echo 请先按照 mise 官方说明完成安装，然后重新双击本脚本：
 echo https://mise.jdx.dev/installing-mise.html
 start "" "https://mise.jdx.dev/installing-mise.html"
+goto PAUSE_OK
+
+:RUST_HELP
+echo.
+echo 没有找到 Tauri 所需的 Rust 或 Cargo。
+echo 请按照 rustup 官方说明安装 Rust，完成后重新双击本脚本：
+echo https://rustup.rs/
+start "" "https://rustup.rs/"
 goto PAUSE_OK
 
 :INSTALL_FAILED
@@ -156,3 +170,24 @@ exit /b 1
 
 :END
 endlocal
+exit /b 0
+
+:CHECK_RUST
+where rustc >nul 2>nul
+if errorlevel 1 exit /b 1
+where cargo >nul 2>nul
+if errorlevel 1 exit /b 1
+for /f "delims=" %%V in ('rustc --version') do set RUST_VERSION=%%V
+for /f "delims=" %%V in ('cargo --version') do set CARGO_VERSION=%%V
+echo 检测通过：%RUST_VERSION%，%CARGO_VERSION%
+exit /b 0
+
+:CHECK_MISE_RUST
+mise exec -- rustc --version >nul 2>nul
+if errorlevel 1 exit /b 1
+mise exec -- cargo --version >nul 2>nul
+if errorlevel 1 exit /b 1
+for /f "delims=" %%V in ('mise exec -- rustc --version') do set RUST_VERSION=%%V
+for /f "delims=" %%V in ('mise exec -- cargo --version') do set CARGO_VERSION=%%V
+echo 检测通过：%RUST_VERSION%，%CARGO_VERSION%
+exit /b 0

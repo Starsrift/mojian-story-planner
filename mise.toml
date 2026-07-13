@@ -1,5 +1,6 @@
 [tools]
 node = "24"
+rust = "stable"
 
 [tasks.install]
 description = "Install project dependencies"
@@ -9,6 +10,18 @@ run = "npm install"
 description = "Start the local development server"
 run = "npm run dev"
 
+[tasks.desktop-dev]
+description = "Start the Tauri desktop application"
+run = "npm run desktop:dev"
+
 [tasks.build]
 description = "Build the production bundle"
 run = "npm run build"
+
+[tasks.desktop-build]
+description = "Build the Tauri desktop application"
+run = "npm run desktop:build"
+
+[tasks.test]
+description = "Run frontend and Rust tests"
+run = "npm test && cargo test --manifest-path src-tauri/Cargo.toml"

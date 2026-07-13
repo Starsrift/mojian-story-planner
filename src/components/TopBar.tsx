@@ -1,4 +1,6 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
+import { isDesktopRuntime, storage, type StorageStatus } from '../db/storage'
+import { describeStorageStatus } from '../db/storageStatus'
 import { useStore } from '../store/useStore'
 
 type ViewMode = 'structure' | 'characters' | 'timeline' | 'foreshadow' | 'wiki'
@@ -36,6 +38,15 @@ export function TopBar() {
 
   const [dropdownOpen, setDropdownOpen] = useState(false)
   const [exported, setExported] = useState(false)
+  const [storageStatus, setStorageStatus] = useState<StorageStatus>(() => ({
+    backend: isDesktopRuntime() ? 'sqlite' : 'indexeddb',
+  }))
+  const [storageStatusError, setStorageStatusError] = useState<string | null>(null)
+  const persistenceStatus = useSyncExternalStore(
+    storage.subscribePersistenceStatus,
+    storage.getPersistenceStatus,
+    storage.getPersistenceStatus,
+  )
   const [theme, setTheme] = useState<'light' | 'dark'>(() => {
     const saved = localStorage.getItem('mojian-theme')
     if (saved === 'light' || saved === 'dark') return saved
@@ -61,6 +72,27 @@ export function TopBar() {
     document.documentElement.setAttribute('data-theme', theme)
     localStorage.setItem('mojian-theme', theme)
   }, [theme])
+
+  useEffect(() => {
+    let active = true
+    storage.getStorageStatus().then((status) => {
+      if (active) {
+        setStorageStatus(status)
+        setStorageStatusError(null)
+      }
+    }).catch((error) => {
+      if (active) {
+        setStorageStatusError(error instanceof Error ? error.message : String(error))
+      }
+    })
+    return () => {
+      active = false
+    }
+  }, [])
+
+  const storageDescription = storageStatusError
+    ? { label: '存储状态异常', title: `读取本地存储状态失败：${storageStatusError}` }
+    : describeStorageStatus(storageStatus, persistenceStatus)
 
   const handleSelect = (id: string) => {
     setDropdownOpen(false)
@@ -170,9 +202,14 @@ export function TopBar() {
 
       {/* 右侧: 主题切换 */}
       <div className="topbar-right">
-        <div className="save-status" title="数据自动保存在当前浏览器中">
+        <div
+          className={`save-status save-status-${storageStatusError ? 'error' : persistenceStatus.phase}`}
+          title={storageDescription.title}
+          role="status"
+          aria-live="polite"
+        >
           <span className="save-status-dot" />
-          本地已保存
+          {storageDescription.label}
         </div>
         <button className="theme-btn" onClick={toggleTheme} title="切换明暗主题" aria-label="切换明暗主题">
           <span aria-hidden="true">{theme === 'dark' ? '☀' : '☾'}</span>

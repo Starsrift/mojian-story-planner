@@ -1,11 +1,28 @@
 import { create } from 'zustand';
-import { db, uid } from '../db/database';
+import { uid } from '../db/database';
+import { storage } from '../db/storage';
+import { KeyedWriteQueue } from './writeQueue';
 import type {
   Project, StoryCard, StoryLink, Character, CharacterRelation,
   TimelineEvent, Foreshadow, WikiEntry
 } from '../types';
 
 type ViewMode = 'structure' | 'characters' | 'timeline' | 'foreshadow' | 'wiki';
+
+const entityWriteQueue = new KeyedWriteQueue();
+
+function entityWriteKey(kind: string, id: string) {
+  return `${kind}:${id}`;
+}
+
+async function runEntityWrite<T>(kind: string, id: string, task: () => Promise<T>): Promise<T> {
+  const finishQueuedMutation = storage.beginQueuedMutation();
+  try {
+    return await entityWriteQueue.run(entityWriteKey(kind, id), task);
+  } finally {
+    finishQueuedMutation();
+  }
+}
 
 interface AppState {
   // 当前状态
@@ -98,7 +115,7 @@ export const useStore = create<AppState>((set, get) => ({
 
   // ====== 项目 ======
   loadProjects: async () => {
-    const projects = await db.projects.orderBy('updatedAt').reverse().toArray();
+    const projects = await storage.listProjects();
     set({ projects, loaded: true });
   },
 
@@ -109,22 +126,13 @@ export const useStore = create<AppState>((set, get) => ({
       id, name, description,
       createdAt: now, updatedAt: now,
     };
-    await db.projects.add(project);
+    await storage.putProject(project);
     set((s) => ({ projects: [project, ...s.projects] }));
     return id;
   },
 
   deleteProject: async (id) => {
-    await db.transaction('rw', [db.projects, db.storyCards, db.storyLinks, db.characters, db.relations, db.timelineEvents, db.foreshadows, db.wikiEntries], async () => {
-      await db.projects.delete(id);
-      await db.storyCards.where('projectId').equals(id).delete();
-      await db.storyLinks.where('projectId').equals(id).delete();
-      await db.characters.where('projectId').equals(id).delete();
-      await db.relations.where('projectId').equals(id).delete();
-      await db.timelineEvents.where('projectId').equals(id).delete();
-      await db.foreshadows.where('projectId').equals(id).delete();
-      await db.wikiEntries.where('projectId').equals(id).delete();
-    });
+    await storage.deleteProject(id);
     set((s) => ({
       projects: s.projects.filter((p) => p.id !== id),
       currentProjectId: s.currentProjectId === id ? null : s.currentProjectId,
@@ -132,6 +140,7 @@ export const useStore = create<AppState>((set, get) => ({
   },
 
   selectProject: async (id) => {
+    await entityWriteQueue.onIdle();
     set({ currentProjectId: id, selectedCardId: null, selectedCharacterId: null });
     await get().loadStoryCards();
     await get().loadStoryLinks();
@@ -149,6 +158,24 @@ export const useStore = create<AppState>((set, get) => ({
   }),
 
   importProjectBackup: async (raw) => {
+    const localSnapshot = raw as {
+      format?: string;
+      projects?: unknown[];
+    };
+
+    if (localSnapshot?.format === 'mojian-local-snapshot') {
+      if (!Array.isArray(localSnapshot.projects) || localSnapshot.projects.length === 0) {
+        throw new Error('这个墨笺本地备份中没有可恢复的作品');
+      }
+
+      let firstProjectId = '';
+      for (const projectBackup of localSnapshot.projects) {
+        const restoredId = await get().importProjectBackup(projectBackup);
+        if (!firstProjectId) firstProjectId = restoredId;
+      }
+      return firstProjectId;
+    }
+
     const backup = raw as {
       format?: string;
       project?: Partial<Project>;
@@ -222,15 +249,17 @@ export const useStore = create<AppState>((set, get) => ({
       ...entry, id: uid(), projectId: newProjectId, createdAt: now, updatedAt: now,
     }));
 
-    await db.transaction('rw', [db.projects, db.storyCards, db.storyLinks, db.characters, db.relations, db.timelineEvents, db.foreshadows, db.wikiEntries], async () => {
-      await db.projects.add(project);
-      if (storyCards.length) await db.storyCards.bulkAdd(storyCards);
-      if (storyLinks.length) await db.storyLinks.bulkAdd(storyLinks);
-      if (characters.length) await db.characters.bulkAdd(characters);
-      if (relations.length) await db.relations.bulkAdd(relations);
-      if (timelineEvents.length) await db.timelineEvents.bulkAdd(timelineEvents);
-      if (foreshadows.length) await db.foreshadows.bulkAdd(foreshadows);
-      if (wikiEntries.length) await db.wikiEntries.bulkAdd(wikiEntries);
+    await storage.importProjectBundle({
+      project,
+      data: {
+        storyCards,
+        storyLinks,
+        characters,
+        relations,
+        timelineEvents,
+        foreshadows,
+        wikiEntries,
+      },
     });
 
     set((state) => ({ projects: [project, ...state.projects] }));
@@ -244,7 +273,7 @@ export const useStore = create<AppState>((set, get) => ({
   loadStoryCards: async () => {
     const pid = get().currentProjectId;
     if (!pid) return;
-    const cards = await db.storyCards.where('projectId').equals(pid).toArray();
+    const cards = await storage.listEntities('storyCards', pid);
     cards.sort((a, b) => a.order - b.order);
     set({ storyCards: cards });
   },
@@ -265,26 +294,33 @@ export const useStore = create<AppState>((set, get) => ({
       color: partial.color || '#8b5e3c',
       createdAt: now, updatedAt: now,
     };
-    await db.storyCards.add(card);
+    await storage.putEntity('storyCards', card);
     set((s) => ({ storyCards: [...s.storyCards, card] }));
     return id;
   },
 
   updateStoryCard: async (id, patch) => {
-    await db.storyCards.update(id, { ...patch, updatedAt: Date.now() });
-    set((s) => ({
-      storyCards: s.storyCards.map((c) => c.id === id ? { ...c, ...patch, updatedAt: Date.now() } : c),
-    }));
+    await runEntityWrite('storyCards', id, async () => {
+      const current = get().storyCards.find((card) => card.id === id);
+      if (!current) return;
+      const updatedAt = Date.now();
+      const next = { ...current, ...patch, updatedAt };
+      await storage.putEntity('storyCards', next);
+      set((s) => ({
+        storyCards: s.storyCards.map((c) => c.id === id ? next : c),
+      }));
+    });
   },
 
   deleteStoryCard: async (id) => {
-    await db.storyCards.delete(id);
-    await db.storyLinks.where('source').equals(id).or('target').equals(id).delete();
-    set((s) => ({
-      storyCards: s.storyCards.filter((c) => c.id !== id),
-      storyLinks: s.storyLinks.filter((l) => l.source !== id && l.target !== id),
-      selectedCardId: s.selectedCardId === id ? null : s.selectedCardId,
-    }));
+    await runEntityWrite('storyCards', id, async () => {
+      await storage.deleteStoryCard(id);
+      set((s) => ({
+        storyCards: s.storyCards.filter((c) => c.id !== id),
+        storyLinks: s.storyLinks.filter((l) => l.source !== id && l.target !== id),
+        selectedCardId: s.selectedCardId === id ? null : s.selectedCardId,
+      }));
+    });
   },
 
   selectCard: (id) => set({ selectedCardId: id }),
@@ -293,7 +329,7 @@ export const useStore = create<AppState>((set, get) => ({
   loadStoryLinks: async () => {
     const pid = get().currentProjectId;
     if (!pid) return;
-    const links = await db.storyLinks.where('projectId').equals(pid).toArray();
+    const links = await storage.listEntities('storyLinks', pid);
     set({ storyLinks: links });
   },
 
@@ -301,13 +337,13 @@ export const useStore = create<AppState>((set, get) => ({
     const pid = get().currentProjectId!;
     const id = uid();
     const link: StoryLink = { id, projectId: pid, source, target, label };
-    await db.storyLinks.add(link);
+    await storage.putEntity('storyLinks', link);
     set((s) => ({ storyLinks: [...s.storyLinks, link] }));
     return id;
   },
 
   deleteStoryLink: async (id) => {
-    await db.storyLinks.delete(id);
+    await storage.deleteEntity('storyLinks', id);
     set((s) => ({ storyLinks: s.storyLinks.filter((l) => l.id !== id) }));
   },
 
@@ -315,7 +351,7 @@ export const useStore = create<AppState>((set, get) => ({
   loadCharacters: async () => {
     const pid = get().currentProjectId;
     if (!pid) return;
-    const chars = await db.characters.where('projectId').equals(pid).toArray();
+    const chars = await storage.listEntities('characters', pid);
     set({ characters: chars });
   },
 
@@ -335,26 +371,33 @@ export const useStore = create<AppState>((set, get) => ({
       color: partial.color || '#c4683f',
       createdAt: now, updatedAt: now,
     };
-    await db.characters.add(char);
+    await storage.putEntity('characters', char);
     set((s) => ({ characters: [...s.characters, char] }));
     return id;
   },
 
   updateCharacter: async (id, patch) => {
-    await db.characters.update(id, { ...patch, updatedAt: Date.now() });
-    set((s) => ({
-      characters: s.characters.map((c) => c.id === id ? { ...c, ...patch, updatedAt: Date.now() } : c),
-    }));
+    await runEntityWrite('characters', id, async () => {
+      const current = get().characters.find((character) => character.id === id);
+      if (!current) return;
+      const updatedAt = Date.now();
+      const next = { ...current, ...patch, updatedAt };
+      await storage.putEntity('characters', next);
+      set((s) => ({
+        characters: s.characters.map((c) => c.id === id ? next : c),
+      }));
+    });
   },
 
   deleteCharacter: async (id) => {
-    await db.characters.delete(id);
-    await db.relations.where('source').equals(id).or('target').equals(id).delete();
-    set((s) => ({
-      characters: s.characters.filter((c) => c.id !== id),
-      relations: s.relations.filter((r) => r.source !== id && r.target !== id),
-      selectedCharacterId: s.selectedCharacterId === id ? null : s.selectedCharacterId,
-    }));
+    await runEntityWrite('characters', id, async () => {
+      await storage.deleteCharacter(id);
+      set((s) => ({
+        characters: s.characters.filter((c) => c.id !== id),
+        relations: s.relations.filter((r) => r.source !== id && r.target !== id),
+        selectedCharacterId: s.selectedCharacterId === id ? null : s.selectedCharacterId,
+      }));
+    });
   },
 
   selectCharacter: (id) => set({ selectedCharacterId: id }),
@@ -363,7 +406,7 @@ export const useStore = create<AppState>((set, get) => ({
   loadRelations: async () => {
     const pid = get().currentProjectId;
     if (!pid) return;
-    const rels = await db.relations.where('projectId').equals(pid).toArray();
+    const rels = await storage.listEntities('relations', pid);
     set({ relations: rels });
   },
 
@@ -371,13 +414,13 @@ export const useStore = create<AppState>((set, get) => ({
     const pid = get().currentProjectId!;
     const id = uid();
     const rel: CharacterRelation = { id, projectId: pid, source, target, type, description };
-    await db.relations.add(rel);
+    await storage.putEntity('relations', rel);
     set((s) => ({ relations: [...s.relations, rel] }));
     return id;
   },
 
   deleteRelation: async (id) => {
-    await db.relations.delete(id);
+    await storage.deleteEntity('relations', id);
     set((s) => ({ relations: s.relations.filter((r) => r.id !== id) }));
   },
 
@@ -385,7 +428,7 @@ export const useStore = create<AppState>((set, get) => ({
   loadTimelineEvents: async () => {
     const pid = get().currentProjectId;
     if (!pid) return;
-    const events = await db.timelineEvents.where('projectId').equals(pid).toArray();
+    const events = await storage.listEntities('timelineEvents', pid);
     events.sort((a, b) => a.order - b.order);
     set({ timelineEvents: events });
   },
@@ -405,28 +448,36 @@ export const useStore = create<AppState>((set, get) => ({
       color: partial.color || '#8b5e3c',
       createdAt: now, updatedAt: now,
     };
-    await db.timelineEvents.add(event);
+    await storage.putEntity('timelineEvents', event);
     set((s) => ({ timelineEvents: [...s.timelineEvents, event] }));
     return id;
   },
 
   updateTimelineEvent: async (id, patch) => {
-    await db.timelineEvents.update(id, { ...patch, updatedAt: Date.now() });
-    set((s) => ({
-      timelineEvents: s.timelineEvents.map((e) => e.id === id ? { ...e, ...patch, updatedAt: Date.now() } : e),
-    }));
+    await runEntityWrite('timelineEvents', id, async () => {
+      const current = get().timelineEvents.find((event) => event.id === id);
+      if (!current) return;
+      const updatedAt = Date.now();
+      const next = { ...current, ...patch, updatedAt };
+      await storage.putEntity('timelineEvents', next);
+      set((s) => ({
+        timelineEvents: s.timelineEvents.map((e) => e.id === id ? next : e),
+      }));
+    });
   },
 
   deleteTimelineEvent: async (id) => {
-    await db.timelineEvents.delete(id);
-    set((s) => ({ timelineEvents: s.timelineEvents.filter((e) => e.id !== id) }));
+    await runEntityWrite('timelineEvents', id, async () => {
+      await storage.deleteEntity('timelineEvents', id);
+      set((s) => ({ timelineEvents: s.timelineEvents.filter((e) => e.id !== id) }));
+    });
   },
 
   // ====== 伏笔 ======
   loadForeshadows: async () => {
     const pid = get().currentProjectId;
     if (!pid) return;
-    const fs = await db.foreshadows.where('projectId').equals(pid).toArray();
+    const fs = await storage.listEntities('foreshadows', pid);
     set({ foreshadows: fs });
   },
 
@@ -446,28 +497,36 @@ export const useStore = create<AppState>((set, get) => ({
       priority: partial.priority || 'medium',
       createdAt: now, updatedAt: now,
     };
-    await db.foreshadows.add(f);
+    await storage.putEntity('foreshadows', f);
     set((s) => ({ foreshadows: [...s.foreshadows, f] }));
     return id;
   },
 
   updateForeshadow: async (id, patch) => {
-    await db.foreshadows.update(id, { ...patch, updatedAt: Date.now() });
-    set((s) => ({
-      foreshadows: s.foreshadows.map((f) => f.id === id ? { ...f, ...patch, updatedAt: Date.now() } : f),
-    }));
+    await runEntityWrite('foreshadows', id, async () => {
+      const current = get().foreshadows.find((foreshadow) => foreshadow.id === id);
+      if (!current) return;
+      const updatedAt = Date.now();
+      const next = { ...current, ...patch, updatedAt };
+      await storage.putEntity('foreshadows', next);
+      set((s) => ({
+        foreshadows: s.foreshadows.map((f) => f.id === id ? next : f),
+      }));
+    });
   },
 
   deleteForeshadow: async (id) => {
-    await db.foreshadows.delete(id);
-    set((s) => ({ foreshadows: s.foreshadows.filter((f) => f.id !== id) }));
+    await runEntityWrite('foreshadows', id, async () => {
+      await storage.deleteEntity('foreshadows', id);
+      set((s) => ({ foreshadows: s.foreshadows.filter((f) => f.id !== id) }));
+    });
   },
 
   // ====== 百科 ======
   loadWikiEntries: async () => {
     const pid = get().currentProjectId;
     if (!pid) return;
-    const entries = await db.wikiEntries.where('projectId').equals(pid).toArray();
+    const entries = await storage.listEntities('wikiEntries', pid);
     set({ wikiEntries: entries });
   },
 
@@ -484,20 +543,28 @@ export const useStore = create<AppState>((set, get) => ({
       tags: partial.tags || [],
       createdAt: now, updatedAt: now,
     };
-    await db.wikiEntries.add(entry);
+    await storage.putEntity('wikiEntries', entry);
     set((s) => ({ wikiEntries: [...s.wikiEntries, entry] }));
     return id;
   },
 
   updateWikiEntry: async (id, patch) => {
-    await db.wikiEntries.update(id, { ...patch, updatedAt: Date.now() });
-    set((s) => ({
-      wikiEntries: s.wikiEntries.map((e) => e.id === id ? { ...e, ...patch, updatedAt: Date.now() } : e),
-    }));
+    await runEntityWrite('wikiEntries', id, async () => {
+      const current = get().wikiEntries.find((entry) => entry.id === id);
+      if (!current) return;
+      const updatedAt = Date.now();
+      const next = { ...current, ...patch, updatedAt };
+      await storage.putEntity('wikiEntries', next);
+      set((s) => ({
+        wikiEntries: s.wikiEntries.map((e) => e.id === id ? next : e),
+      }));
+    });
   },
 
   deleteWikiEntry: async (id) => {
-    await db.wikiEntries.delete(id);
-    set((s) => ({ wikiEntries: s.wikiEntries.filter((e) => e.id !== id) }));
+    await runEntityWrite('wikiEntries', id, async () => {
+      await storage.deleteEntity('wikiEntries', id);
+      set((s) => ({ wikiEntries: s.wikiEntries.filter((e) => e.id !== id) }));
+    });
   },
 }));

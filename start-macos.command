@@ -5,6 +5,11 @@ set -u
 PROJECT_DIR="${0:A:h}"
 cd "$PROJECT_DIR" || exit 1
 
+# rustup 会把 Cargo 环境写到这里；双击 .command 时主动加载，避免新终端找不到 rustc/cargo。
+if [[ -f "$HOME/.cargo/env" ]]; then
+  source "$HOME/.cargo/env"
+fi
+
 pause_and_exit() {
   local code="${1:-1}"
   echo
@@ -53,6 +58,36 @@ check_global_node() {
   node -e 'const [major, minor] = process.versions.node.split(".").map(Number); process.exit(major > 22 || (major === 22 && minor >= 12) || (major === 20 && minor >= 19) ? 0 : 1)'
 }
 
+check_rust_toolchain() {
+  local runner=("$@")
+  if [[ ${#runner[@]} -gt 0 ]]; then
+    "${runner[@]}" rustc --version >/dev/null 2>&1 && \
+      "${runner[@]}" cargo --version >/dev/null 2>&1
+    return $?
+  fi
+
+  command -v rustc >/dev/null 2>&1 && command -v cargo >/dev/null 2>&1
+}
+
+ensure_rust_toolchain() {
+  local runner=("$@")
+  echo
+  echo "正在检查 Tauri 所需的 Rust 工具链..."
+  if check_rust_toolchain "${runner[@]}"; then
+    if [[ ${#runner[@]} -gt 0 ]]; then
+      echo "检测通过：$("${runner[@]}" rustc --version)，$("${runner[@]}" cargo --version)"
+    else
+      echo "检测通过：$(rustc --version)，$(cargo --version)"
+    fi
+    return 0
+  fi
+
+  echo "没有找到 Rust 或 Cargo。"
+  echo "请按照 rustup 官方说明安装 Rust，完成后重新双击本脚本。"
+  open "https://rustup.rs/" >/dev/null 2>&1 || true
+  return 1
+}
+
 echo "========================================"
 echo "  墨笺 · 小说策划台 — macOS 启动向导"
 echo "========================================"
@@ -93,7 +128,7 @@ case "$mode" in
     fi
 
     echo
-    echo "[2/4] 正在准备项目指定的 Node.js 24 环境..."
+    echo "[2/4] 正在准备项目指定的 Node.js 24 与 Rust 环境..."
     mise trust >/dev/null 2>&1 || true
     mise install || {
       echo "Node.js 环境安装失败，请检查网络连接和 mise 配置。"
@@ -101,12 +136,13 @@ case "$mode" in
     }
 
     install_dependencies_if_needed mise exec --
+    ensure_rust_toolchain mise exec -- || pause_and_exit 0
 
     echo
-    echo "[4/4] 启动开发服务器，浏览器将自动打开..."
-    echo "停止服务时，请回到此窗口按 Control + C。"
+    echo "[4/4] 启动墨笺桌面应用..."
+    echo "停止开发服务时，请回到此窗口按 Control + C。"
     echo
-    mise exec -- npm run dev -- --host 127.0.0.1 --open
+    mise exec -- npm run desktop:dev
     ;;
 
   2)
@@ -125,12 +161,13 @@ case "$mode" in
 
     echo "检测通过：Node.js $(node --version)，npm $(npm --version)"
     install_dependencies_if_needed
+    ensure_rust_toolchain || pause_and_exit 0
 
     echo
-    echo "[4/4] 启动开发服务器，浏览器将自动打开..."
-    echo "停止服务时，请回到此窗口按 Control + C。"
+    echo "[4/4] 启动墨笺桌面应用..."
+    echo "停止开发服务时，请回到此窗口按 Control + C。"
     echo
-    npm run dev -- --host 127.0.0.1 --open
+    npm run desktop:dev
     ;;
 
   *)

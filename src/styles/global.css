@@ -944,6 +944,20 @@ select:focus-visible,
   box-shadow: 0 0 0 3px var(--success-soft);
 }
 
+.save-status-saving .save-status-dot {
+  background: var(--warning);
+  box-shadow: 0 0 0 3px var(--warning-soft);
+}
+
+.save-status-error {
+  color: var(--danger);
+}
+
+.save-status-error .save-status-dot {
+  background: var(--danger);
+  box-shadow: 0 0 0 3px var(--danger-soft);
+}
+
 .theme-btn {
   width: 36px;
   height: 36px;
