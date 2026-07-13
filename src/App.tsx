@@ -3,6 +3,7 @@ import { useStore } from './store/useStore'
 import { TopBar } from './components/TopBar'
 import { WelcomeScreen } from './components/WelcomeScreen'
 
+const ProjectOverview = lazy(() => import('./components/ProjectOverview').then((module) => ({ default: module.ProjectOverview })))
 const StoryBoard = lazy(() => import('./components/StoryBoard').then((module) => ({ default: module.StoryBoard })))
 const CharacterMap = lazy(() => import('./components/CharacterMap').then((module) => ({ default: module.CharacterMap })))
 const Timeline = lazy(() => import('./components/Timeline').then((module) => ({ default: module.Timeline })))
@@ -48,6 +49,7 @@ export default function App() {
       <div className="main">
         <div className="workspace">
           <Suspense fallback={<WorkspaceLoading />}>
+            {viewMode === 'overview' && <ProjectOverview />}
             {viewMode === 'structure' && <StoryBoard />}
             {viewMode === 'characters' && <CharacterMap />}
             {viewMode === 'timeline' && <Timeline />}

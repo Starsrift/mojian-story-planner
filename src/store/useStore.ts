@@ -2,10 +2,12 @@ import { create } from 'zustand';
 import { db, uid } from '../db/database';
 import type {
   Project, StoryCard, StoryLink, Character, CharacterRelation,
-  TimelineEvent, Foreshadow, WikiEntry
+  TimelineEvent, Foreshadow, WikiEntry, ViewMode
 } from '../types';
 
-type ViewMode = 'structure' | 'characters' | 'timeline' | 'foreshadow' | 'wiki';
+function sortProjectsByUpdated(projects: Project[]): Project[] {
+  return [...projects].sort((a, b) => b.updatedAt - a.updatedAt);
+}
 
 interface AppState {
   // 当前状态
@@ -81,9 +83,21 @@ interface AppState {
   deleteWikiEntry: (id: string) => Promise<void>;
 }
 
-export const useStore = create<AppState>((set, get) => ({
+export const useStore = create<AppState>((set, get) => {
+  const touchProject = async (projectId: string | null | undefined) => {
+    if (!projectId) return;
+    const updatedAt = Date.now();
+    await db.projects.update(projectId, { updatedAt });
+    set((s) => ({
+      projects: sortProjectsByUpdated(
+        s.projects.map((p) => p.id === projectId ? { ...p, updatedAt } : p)
+      ),
+    }));
+  };
+
+  return ({
   currentProjectId: null,
-  viewMode: 'structure',
+  viewMode: 'overview',
   loaded: false,
   projects: [],
   storyCards: [],
@@ -266,20 +280,25 @@ export const useStore = create<AppState>((set, get) => ({
       createdAt: now, updatedAt: now,
     };
     await db.storyCards.add(card);
+    await touchProject(pid);
     set((s) => ({ storyCards: [...s.storyCards, card] }));
     return id;
   },
 
   updateStoryCard: async (id, patch) => {
-    await db.storyCards.update(id, { ...patch, updatedAt: Date.now() });
+    const now = Date.now();
+    await db.storyCards.update(id, { ...patch, updatedAt: now });
+    await touchProject(get().currentProjectId);
     set((s) => ({
-      storyCards: s.storyCards.map((c) => c.id === id ? { ...c, ...patch, updatedAt: Date.now() } : c),
+      storyCards: s.storyCards.map((c) => c.id === id ? { ...c, ...patch, updatedAt: now } : c),
     }));
   },
 
   deleteStoryCard: async (id) => {
+    const pid = get().currentProjectId;
     await db.storyCards.delete(id);
     await db.storyLinks.where('source').equals(id).or('target').equals(id).delete();
+    await touchProject(pid);
     set((s) => ({
       storyCards: s.storyCards.filter((c) => c.id !== id),
       storyLinks: s.storyLinks.filter((l) => l.source !== id && l.target !== id),
@@ -302,12 +321,15 @@ export const useStore = create<AppState>((set, get) => ({
     const id = uid();
     const link: StoryLink = { id, projectId: pid, source, target, label };
     await db.storyLinks.add(link);
+    await touchProject(pid);
     set((s) => ({ storyLinks: [...s.storyLinks, link] }));
     return id;
   },
 
   deleteStoryLink: async (id) => {
+    const pid = get().currentProjectId;
     await db.storyLinks.delete(id);
+    await touchProject(pid);
     set((s) => ({ storyLinks: s.storyLinks.filter((l) => l.id !== id) }));
   },
 
@@ -336,20 +358,25 @@ export const useStore = create<AppState>((set, get) => ({
       createdAt: now, updatedAt: now,
     };
     await db.characters.add(char);
+    await touchProject(pid);
     set((s) => ({ characters: [...s.characters, char] }));
     return id;
   },
 
   updateCharacter: async (id, patch) => {
-    await db.characters.update(id, { ...patch, updatedAt: Date.now() });
+    const now = Date.now();
+    await db.characters.update(id, { ...patch, updatedAt: now });
+    await touchProject(get().currentProjectId);
     set((s) => ({
-      characters: s.characters.map((c) => c.id === id ? { ...c, ...patch, updatedAt: Date.now() } : c),
+      characters: s.characters.map((c) => c.id === id ? { ...c, ...patch, updatedAt: now } : c),
     }));
   },
 
   deleteCharacter: async (id) => {
+    const pid = get().currentProjectId;
     await db.characters.delete(id);
     await db.relations.where('source').equals(id).or('target').equals(id).delete();
+    await touchProject(pid);
     set((s) => ({
       characters: s.characters.filter((c) => c.id !== id),
       relations: s.relations.filter((r) => r.source !== id && r.target !== id),
@@ -372,12 +399,15 @@ export const useStore = create<AppState>((set, get) => ({
     const id = uid();
     const rel: CharacterRelation = { id, projectId: pid, source, target, type, description };
     await db.relations.add(rel);
+    await touchProject(pid);
     set((s) => ({ relations: [...s.relations, rel] }));
     return id;
   },
 
   deleteRelation: async (id) => {
+    const pid = get().currentProjectId;
     await db.relations.delete(id);
+    await touchProject(pid);
     set((s) => ({ relations: s.relations.filter((r) => r.id !== id) }));
   },
 
@@ -406,19 +436,24 @@ export const useStore = create<AppState>((set, get) => ({
       createdAt: now, updatedAt: now,
     };
     await db.timelineEvents.add(event);
+    await touchProject(pid);
     set((s) => ({ timelineEvents: [...s.timelineEvents, event] }));
     return id;
   },
 
   updateTimelineEvent: async (id, patch) => {
-    await db.timelineEvents.update(id, { ...patch, updatedAt: Date.now() });
+    const now = Date.now();
+    await db.timelineEvents.update(id, { ...patch, updatedAt: now });
+    await touchProject(get().currentProjectId);
     set((s) => ({
-      timelineEvents: s.timelineEvents.map((e) => e.id === id ? { ...e, ...patch, updatedAt: Date.now() } : e),
+      timelineEvents: s.timelineEvents.map((e) => e.id === id ? { ...e, ...patch, updatedAt: now } : e),
     }));
   },
 
   deleteTimelineEvent: async (id) => {
+    const pid = get().currentProjectId;
     await db.timelineEvents.delete(id);
+    await touchProject(pid);
     set((s) => ({ timelineEvents: s.timelineEvents.filter((e) => e.id !== id) }));
   },
 
@@ -447,19 +482,24 @@ export const useStore = create<AppState>((set, get) => ({
       createdAt: now, updatedAt: now,
     };
     await db.foreshadows.add(f);
+    await touchProject(pid);
     set((s) => ({ foreshadows: [...s.foreshadows, f] }));
     return id;
   },
 
   updateForeshadow: async (id, patch) => {
-    await db.foreshadows.update(id, { ...patch, updatedAt: Date.now() });
+    const now = Date.now();
+    await db.foreshadows.update(id, { ...patch, updatedAt: now });
+    await touchProject(get().currentProjectId);
     set((s) => ({
-      foreshadows: s.foreshadows.map((f) => f.id === id ? { ...f, ...patch, updatedAt: Date.now() } : f),
+      foreshadows: s.foreshadows.map((f) => f.id === id ? { ...f, ...patch, updatedAt: now } : f),
     }));
   },
 
   deleteForeshadow: async (id) => {
+    const pid = get().currentProjectId;
     await db.foreshadows.delete(id);
+    await touchProject(pid);
     set((s) => ({ foreshadows: s.foreshadows.filter((f) => f.id !== id) }));
   },
 
@@ -485,19 +525,25 @@ export const useStore = create<AppState>((set, get) => ({
       createdAt: now, updatedAt: now,
     };
     await db.wikiEntries.add(entry);
+    await touchProject(pid);
     set((s) => ({ wikiEntries: [...s.wikiEntries, entry] }));
     return id;
   },
 
   updateWikiEntry: async (id, patch) => {
-    await db.wikiEntries.update(id, { ...patch, updatedAt: Date.now() });
+    const now = Date.now();
+    await db.wikiEntries.update(id, { ...patch, updatedAt: now });
+    await touchProject(get().currentProjectId);
     set((s) => ({
-      wikiEntries: s.wikiEntries.map((e) => e.id === id ? { ...e, ...patch, updatedAt: Date.now() } : e),
+      wikiEntries: s.wikiEntries.map((e) => e.id === id ? { ...e, ...patch, updatedAt: now } : e),
     }));
   },
 
   deleteWikiEntry: async (id) => {
+    const pid = get().currentProjectId;
     await db.wikiEntries.delete(id);
+    await touchProject(pid);
     set((s) => ({ wikiEntries: s.wikiEntries.filter((e) => e.id !== id) }));
   },
-}));
+  });
+});

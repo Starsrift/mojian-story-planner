@@ -2,6 +2,9 @@
 // 核心类型定义
 // ============================================================
 
+/** 工作台视图 */
+export type ViewMode = 'overview' | 'structure' | 'characters' | 'timeline' | 'foreshadow' | 'wiki';
+
 /** 作品 */
 export interface Project {
   id: string;

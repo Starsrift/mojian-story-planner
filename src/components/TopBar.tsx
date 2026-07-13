@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
 import { useStore } from '../store/useStore'
-
-type ViewMode = 'structure' | 'characters' | 'timeline' | 'foreshadow' | 'wiki'
+import type { ViewMode } from '../types'
 
 const VIEWS: { mode: ViewMode; label: string; short: string }[] = [
+  { mode: 'overview', label: '作品总览', short: '总览' },
   { mode: 'structure', label: '故事结构', short: '结构板' },
   { mode: 'characters', label: '人物关系', short: '人物图' },
   { mode: 'timeline', label: '故事时间线', short: '时间线' },
