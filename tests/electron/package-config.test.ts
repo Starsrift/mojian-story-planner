@@ -6,6 +6,7 @@ import { describe, expect, it } from 'vitest'
 type BuilderConfig = {
   appId?: string
   artifactName?: string
+  electronDist?: string
   directories?: { output?: string }
   files?: string[]
   win?: { target?: string[] }
@@ -14,6 +15,8 @@ type BuilderConfig = {
 }
 
 type PackageConfig = {
+  author?: { name?: string; email?: string }
+  description?: string
   productName?: string
   main?: string
   scripts?: Record<string, string>
@@ -39,6 +42,20 @@ describe('Electron packaging metadata', () => {
       expect.arrayContaining(['dist/**', 'dist-electron/**']),
     )
     expect(packageConfig.build?.directories?.output).toBe('release')
+  })
+
+  it('packages the installed Electron runtime without downloading another archive', () => {
+    expect(packageConfig.build?.electronDist).toBe('node_modules/electron/dist')
+  })
+
+  it('provides complete package identity metadata', () => {
+    expect(packageConfig.description).toBe(
+      'A desktop workspace for planning stories and organizing narrative structure.',
+    )
+    expect(packageConfig.author).toEqual({
+      name: 'edward-win',
+      email: 'aetherwyrm@vip.163.com',
+    })
   })
 
   it('configures Windows NSIS and ZIP distributions', () => {

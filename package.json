@@ -1,6 +1,11 @@
 {
   "name": "mojian-story-planner",
   "productName": "Mojian Story Planner",
+  "description": "A desktop workspace for planning stories and organizing narrative structure.",
+  "author": {
+    "name": "edward-win",
+    "email": "aetherwyrm@vip.163.com"
+  },
   "private": true,
   "version": "0.0.0",
   "type": "module",
@@ -36,6 +41,7 @@
   "build": {
     "appId": "com.starsrift.mojian",
     "artifactName": "mojian-story-planner-${version}-${os}-${arch}.${ext}",
+    "electronDist": "node_modules/electron/dist",
     "directories": {
       "output": "release"
     },
