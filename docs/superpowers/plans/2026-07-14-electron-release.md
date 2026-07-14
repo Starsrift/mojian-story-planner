@@ -18,6 +18,16 @@
 - Create ".github/workflows/ci.yml" and "release.yml".
 - Modify package metadata, Vite config, CSP, gitignore, and README.
 
+### Task 0: Configure the Desktop Test Harness
+
+**Files:** Modify "package.json" and "vite.config.ts"; create "src/test/setup.ts" and "src/test/smoke.test.ts".
+
+- [ ] Write a smoke test asserting IndexedDB exists in the jsdom environment.
+- [ ] Run the test command; expect failure because Vitest is not installed.
+- [ ] Install Vitest, jsdom, jest-dom, and fake-indexeddb. Add test and test:run scripts, configure jsdom, and load the setup file.
+- [ ] Run "npm run test:run -- src/test/smoke.test.ts"; expect one passing test.
+- [ ] Commit with message "test: add desktop test harness".
+
 ### Task 1: Add the Secure Electron Shell
 
 **Files:** Modify "package.json", "vite.config.ts", and "index.html"; create the Electron files and "tests/electron/security.test.ts".
