@@ -4,6 +4,7 @@ import { resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
 
 type BuilderConfig = {
+  afterExtract?: string
   appId?: string
   artifactName?: string
   electronDist?: string
@@ -38,10 +39,17 @@ describe('Electron packaging metadata', () => {
 
   it('packages the web application and all Electron runtime artifacts', () => {
     expect(packageConfig.main).toBe('dist-electron/main.js')
-    expect(packageConfig.build?.files).toEqual(
-      expect.arrayContaining(['dist/**', 'dist-electron/**']),
-    )
+    expect(packageConfig.build?.files).toEqual([
+      'dist/**',
+      'dist-electron/main.js',
+      'dist-electron/navigationPolicy.js',
+      'dist-electron/runtime.js',
+      'dist-electron/preload.cjs',
+      '!dist-electron/**/*.map',
+      '!node_modules/**',
+    ])
     expect(packageConfig.build?.directories?.output).toBe('release')
+    expect(packageConfig.build?.afterExtract).toBe('scripts/after-extract.mjs')
   })
 
   it('packages the installed Electron runtime without downloading another archive', () => {
@@ -80,7 +88,9 @@ describe('Electron packaging scripts', () => {
     (scriptName) => {
       const script = packageConfig.scripts?.[scriptName]
 
-      expect(script).toContain('npm run build && npm run build:electron && electron-builder')
+      expect(script).toContain(
+        'npm run build && npm run build:electron && npm run clean:release && electron-builder',
+      )
     },
   )
 
@@ -88,9 +98,16 @@ describe('Electron packaging scripts', () => {
     expect(packageConfig.scripts?.['dist:win']).toContain('--win nsis zip --x64')
   })
 
-  it('builds DMG and ZIP macOS artifacts for x64 and arm64', () => {
-    expect(packageConfig.scripts?.['dist:mac']).toContain(
-      '--mac dmg zip --x64 --arm64',
+  it('builds host-native macOS artifacts without cross-labeling architectures', () => {
+    const script = packageConfig.scripts?.['dist:mac']
+
+    expect(script).toContain('--mac dmg zip')
+    expect(script).not.toMatch(/--(?:x64|arm64|universal)/)
+  })
+
+  it('cleans only the configured release directory before packaging', () => {
+    expect(packageConfig.scripts?.['clean:release']).toBe(
+      'node scripts/clean-release.mjs',
     )
   })
 })

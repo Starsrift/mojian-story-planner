@@ -14,15 +14,17 @@
     "dev": "vite",
     "build": "tsc && vite build",
     "build:electron": "node scripts/build-electron.mjs",
-    "electron:build": "npm run build && npm run build:electron && electron-builder",
+    "clean:release": "node scripts/clean-release.mjs",
+    "electron:build": "npm run build && npm run build:electron && npm run clean:release && electron-builder",
     "electron:dev": "node scripts/electron-dev.mjs",
-    "dist:win": "npm run build && npm run build:electron && electron-builder --win nsis zip --x64",
-    "dist:mac": "npm run build && npm run build:electron && electron-builder --mac dmg zip --x64 --arm64",
+    "dist:win": "npm run build && npm run build:electron && npm run clean:release && electron-builder --win nsis zip --x64",
+    "dist:mac": "npm run build && npm run build:electron && npm run clean:release && electron-builder --mac dmg zip",
     "preview": "vite preview",
     "test": "vitest",
     "test:run": "vitest run"
   },
   "devDependencies": {
+    "@electron/asar": "^3.4.1",
     "@testing-library/jest-dom": "^6.9.1",
     "@types/d3": "^7.4.3",
     "@types/node": "^26.1.1",
@@ -34,20 +36,32 @@
     "esbuild": "^0.28.1",
     "fake-indexeddb": "^6.2.5",
     "jsdom": "^29.1.1",
+    "@xyflow/react": "^12.11.2",
+    "d3": "^7.9.0",
+    "dexie": "^4.4.4",
+    "react": "^19.2.7",
+    "react-dom": "^19.2.7",
     "typescript": "~6.0.2",
     "vite": "^8.1.1",
-    "vitest": "^4.1.10"
+    "vitest": "^4.1.10",
+    "zustand": "^5.0.14"
   },
   "build": {
     "appId": "com.starsrift.mojian",
     "artifactName": "mojian-story-planner-${version}-${os}-${arch}.${ext}",
+    "afterExtract": "scripts/after-extract.mjs",
     "electronDist": "node_modules/electron/dist",
     "directories": {
       "output": "release"
     },
     "files": [
       "dist/**",
-      "dist-electron/**"
+      "dist-electron/main.js",
+      "dist-electron/navigationPolicy.js",
+      "dist-electron/runtime.js",
+      "dist-electron/preload.cjs",
+      "!dist-electron/**/*.map",
+      "!node_modules/**"
     ],
     "win": {
       "target": [
@@ -66,13 +80,5 @@
         "zip"
       ]
     }
-  },
-  "dependencies": {
-    "@xyflow/react": "^12.11.2",
-    "d3": "^7.9.0",
-    "dexie": "^4.4.4",
-    "react": "^19.2.7",
-    "react-dom": "^19.2.7",
-    "zustand": "^5.0.14"
   }
 }

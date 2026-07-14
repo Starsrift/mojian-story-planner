@@ -26,13 +26,10 @@ function runTypeScript(configRelativePath, label) {
   })
 }
 
+await rm(outputDirectory, { force: true, recursive: true })
 await Promise.all([
   runTypeScript('electron/tsconfig.json', 'Electron main-process build'),
   runTypeScript('electron/tsconfig.preload.json', 'Electron preload type check'),
-])
-await Promise.all([
-  rm(resolve(outputDirectory, 'preload.js'), { force: true }),
-  rm(resolve(outputDirectory, 'preload.js.map'), { force: true }),
 ])
 await build({
   entryPoints: [resolve(projectRoot, 'electron/preload.ts')],
@@ -41,6 +38,6 @@ await build({
   external: ['electron'],
   format: 'cjs',
   platform: 'node',
-  sourcemap: true,
+  sourcemap: false,
   target: 'node22',
 })
