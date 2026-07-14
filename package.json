@@ -3,9 +3,13 @@
   "private": true,
   "version": "0.0.0",
   "type": "module",
+  "main": "dist-electron/main.js",
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
+    "build:electron": "tsc -p electron/tsconfig.json",
+    "electron:dev": "concurrently -k \"vite --host 127.0.0.1 --port 5173 --strictPort\" \"wait-on http://127.0.0.1:5173 && npm run build:electron && npm run electron:start\"",
+    "electron:start": "set \"VITE_DEV_SERVER_URL=http://127.0.0.1:5173\" && electron .",
     "preview": "vite preview",
     "test": "vitest",
     "test:run": "vitest run"
@@ -13,14 +17,19 @@
   "devDependencies": {
     "@testing-library/jest-dom": "^6.9.1",
     "@types/d3": "^7.4.3",
+    "@types/node": "^26.1.1",
     "@types/react": "^19.2.17",
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^6.0.3",
+    "concurrently": "^10.0.3",
+    "electron": "^43.1.0",
+    "electron-builder": "^26.15.3",
     "fake-indexeddb": "^6.2.5",
     "jsdom": "^29.1.1",
     "typescript": "~6.0.2",
     "vite": "^8.1.1",
-    "vitest": "^4.1.10"
+    "vitest": "^4.1.10",
+    "wait-on": "^9.0.10"
   },
   "dependencies": {
     "@xyflow/react": "^12.11.2",
