@@ -8,9 +8,9 @@ import { build } from 'esbuild'
 const projectRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const outputDirectory = resolve(projectRoot, 'dist-electron')
 
-function compileMainProcess() {
+function runTypeScript(configRelativePath, label) {
   const compilerPath = resolve(projectRoot, 'node_modules/typescript/bin/tsc')
-  const configPath = resolve(projectRoot, 'electron/tsconfig.json')
+  const configPath = resolve(projectRoot, configRelativePath)
 
   return new Promise((resolvePromise, reject) => {
     const compiler = spawn(process.execPath, [compilerPath, '-p', configPath], {
@@ -19,14 +19,17 @@ function compileMainProcess() {
     })
     compiler.once('error', reject)
     compiler.once('exit', (code, signal) => {
-      if (signal) reject(new Error(`Electron TypeScript build exited after ${signal}`))
-      else if (code !== 0) reject(new Error(`Electron TypeScript build exited with code ${code}`))
+      if (signal) reject(new Error(`${label} exited after ${signal}`))
+      else if (code !== 0) reject(new Error(`${label} exited with code ${code}`))
       else resolvePromise()
     })
   })
 }
 
-await compileMainProcess()
+await Promise.all([
+  runTypeScript('electron/tsconfig.json', 'Electron main-process build'),
+  runTypeScript('electron/tsconfig.preload.json', 'Electron preload type check'),
+])
 await Promise.all([
   rm(resolve(outputDirectory, 'preload.js'), { force: true }),
   rm(resolve(outputDirectory, 'preload.js.map'), { force: true }),

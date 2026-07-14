@@ -7,6 +7,7 @@ import { describe, expect, it } from 'vitest'
 
 const buildScriptPath = resolve(process.cwd(), 'scripts/build-electron.mjs')
 const preloadArtifactPath = resolve(process.cwd(), 'dist-electron/preload.cjs')
+const preloadTypeConfigPath = resolve(process.cwd(), 'electron/tsconfig.preload.json')
 const mainProcessSource = readFileSync(resolve(process.cwd(), 'electron/main.ts'), 'utf8')
 
 describe('sandboxed preload artifact', () => {
@@ -48,5 +49,20 @@ describe('sandboxed preload artifact', () => {
 
   it('is referenced by the exact CommonJS artifact name', () => {
     expect(mainProcessSource).toContain("join(electronDirectory, 'preload.cjs')")
+  })
+
+  it('runs a dedicated no-emit type check before bundling the preload', () => {
+    expect(existsSync(preloadTypeConfigPath)).toBe(true)
+    if (!existsSync(preloadTypeConfigPath)) return
+
+    const config = JSON.parse(readFileSync(preloadTypeConfigPath, 'utf8')) as {
+      compilerOptions?: { noEmit?: boolean }
+      include?: string[]
+    }
+    const buildScript = readFileSync(buildScriptPath, 'utf8')
+
+    expect(config.compilerOptions?.noEmit).toBe(true)
+    expect(config.include).toEqual(['preload.ts'])
+    expect(buildScript).toContain("'electron/tsconfig.preload.json'")
   })
 })
