@@ -2,6 +2,8 @@ import { app, BrowserWindow, shell } from 'electron'
 import { dirname, join } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 
+import { loadApplicationContent } from './runtime.js'
+
 const electronDirectory = dirname(fileURLToPath(import.meta.url))
 
 function isApplicationUrl(targetUrl: string, applicationUrl: string): boolean {
@@ -26,7 +28,7 @@ function createWindow(): void {
     width: 1280,
     height: 800,
     webPreferences: {
-      preload: join(electronDirectory, 'preload.js'),
+      preload: join(electronDirectory, 'preload.cjs'),
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,
@@ -53,11 +55,12 @@ function createWindow(): void {
     return { action: 'deny' }
   })
 
-  if (process.env.VITE_DEV_SERVER_URL) {
-    void mainWindow.loadURL(process.env.VITE_DEV_SERVER_URL)
-  } else {
-    void mainWindow.loadFile(productionEntry)
-  }
+  void loadApplicationContent(mainWindow, {
+    developmentUrl: process.env.VITE_DEV_SERVER_URL,
+    productionEntry,
+  }).catch((error: unknown) => {
+    console.error('Failed to display the Electron load diagnostic', error)
+  })
 }
 
 app.whenReady().then(() => {

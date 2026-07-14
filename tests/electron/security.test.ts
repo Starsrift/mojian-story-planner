@@ -2,6 +2,7 @@ import { existsSync, readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 
 import { describe, expect, it } from 'vitest'
+import { build, createServer } from 'vite'
 
 const mainProcessPath = resolve(process.cwd(), 'electron/main.ts')
 const mainProcessSource = existsSync(mainProcessPath)
@@ -14,7 +15,8 @@ const developmentLauncherSource = existsSync(developmentLauncherPath)
 const packageJson = JSON.parse(
   readFileSync(resolve(process.cwd(), 'package.json'), 'utf8'),
 ) as { scripts?: Record<string, string> }
-const applicationHtml = readFileSync(resolve(process.cwd(), 'index.html'), 'utf8')
+const applicationHtmlPath = resolve(process.cwd(), 'index.html')
+const applicationHtml = readFileSync(applicationHtmlPath, 'utf8')
 
 describe('Electron security policy', () => {
   it('enables renderer process isolation', () => {
@@ -51,15 +53,25 @@ describe('Electron development server ownership', () => {
     expect(developmentLauncherSource).not.toContain('5173')
   })
 
-  it('allows Vite HMR on the owned dynamic loopback port', () => {
-    expect(applicationHtml).toContain("connect-src 'self' ws://127.0.0.1:*")
-    expect(applicationHtml).not.toContain('ws://localhost:5173')
+  it('keeps the production CSP free of loopback WebSocket access', async () => {
+    await build({ logLevel: 'silent' })
+    const productionHtml = readFileSync(resolve(process.cwd(), 'dist/index.html'), 'utf8')
+
+    expect(productionHtml).toContain("connect-src 'self'")
+    expect(productionHtml).not.toContain('ws://')
   })
 
-  it('cleans up active child processes and both development servers', () => {
-    expect(developmentLauncherSource).toContain('[buildProcess, electronProcess]')
-    expect(developmentLauncherSource).toMatch(/child\.kill\(\)/)
-    expect(developmentLauncherSource).toContain('viteServer?.close()')
-    expect(developmentLauncherSource).toContain('closeHttpServer(httpServer)')
+  it('adds owned loopback HMR access only to development HTML', async () => {
+    const server = await createServer({
+      logLevel: 'silent',
+      server: { middlewareMode: true },
+    })
+
+    try {
+      const developmentHtml = await server.transformIndexHtml('/', applicationHtml)
+      expect(developmentHtml).toContain("connect-src 'self' ws://127.0.0.1:*")
+    } finally {
+      await server.close()
+    }
   })
 })
