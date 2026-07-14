@@ -21,7 +21,8 @@
     "dist:mac": "npm run build && npm run build:electron && npm run clean:release && node scripts/package-mac.mjs",
     "preview": "vite preview",
     "test": "vitest",
-    "test:run": "vitest run"
+    "test:run": "vitest run",
+    "verify:release": "node scripts/verify-release-artifacts.mjs"
   },
   "devDependencies": {
     "@electron/asar": "^3.4.1",
