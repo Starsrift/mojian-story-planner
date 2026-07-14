@@ -1,5 +1,6 @@
 {
   "name": "mojian-story-planner",
+  "productName": "Mojian Story Planner",
   "private": true,
   "version": "0.0.0",
   "type": "module",
@@ -8,7 +9,10 @@
     "dev": "vite",
     "build": "tsc && vite build",
     "build:electron": "node scripts/build-electron.mjs",
+    "electron:build": "npm run build && npm run build:electron && electron-builder",
     "electron:dev": "node scripts/electron-dev.mjs",
+    "dist:win": "npm run build && npm run build:electron && electron-builder --win nsis zip --x64",
+    "dist:mac": "npm run build && npm run build:electron && electron-builder --mac dmg zip --x64 --arm64",
     "preview": "vite preview",
     "test": "vitest",
     "test:run": "vitest run"
@@ -28,6 +32,34 @@
     "typescript": "~6.0.2",
     "vite": "^8.1.1",
     "vitest": "^4.1.10"
+  },
+  "build": {
+    "appId": "com.starsrift.mojian",
+    "artifactName": "mojian-story-planner-${version}-${os}-${arch}.${ext}",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**",
+      "dist-electron/**"
+    ],
+    "win": {
+      "target": [
+        "nsis",
+        "zip"
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false
+    },
+    "mac": {
+      "category": "public.app-category.productivity",
+      "target": [
+        "dmg",
+        "zip"
+      ]
+    }
   },
   "dependencies": {
     "@xyflow/react": "^12.11.2",
