@@ -19,7 +19,16 @@ const projectRoot = process.cwd()
 const npmCliPath = process.env.npm_execpath
 const buildScriptPath = resolve(projectRoot, 'scripts/build-electron.mjs')
 const cleanScriptPath = resolve(projectRoot, 'scripts/clean-release.mjs')
-const afterExtractPath = resolve(projectRoot, 'scripts/after-extract.mjs')
+const afterPackPath = resolve(projectRoot, 'scripts/after-pack.mjs')
+
+type AfterPackHook = (context: object) => Promise<void>
+
+async function runAfterPack(context: object): Promise<void> {
+  const hookModule = (await import(pathToFileURL(afterPackPath).href)) as {
+    default: AfterPackHook
+  }
+  await hookModule.default(context)
+}
 
 describe('release cleanup', () => {
   it('ignores arbitrary CLI paths and removes only its project release directory', () => {
@@ -50,36 +59,97 @@ describe('release cleanup', () => {
 })
 
 describe('custom Electron distribution cleanup', () => {
-  it('removes only default runtime metadata from the extracted app', () => {
-    expect(existsSync(afterExtractPath)).toBe(true)
-    if (!existsSync(afterExtractPath)) return
+  it('removes only Windows runtime metadata from appOutDir', async () => {
+    expect(existsSync(afterPackPath)).toBe(true)
+    if (!existsSync(afterPackPath)) return
 
-    const appOutDir = mkdtempSync(join(tmpdir(), 'mojian-after-extract-'))
+    const appOutDir = mkdtempSync(join(tmpdir(), 'mojian-after-pack-win-'))
+    const unrelatedDirectory = mkdtempSync(join(tmpdir(), 'mojian-after-pack-unrelated-'))
     const defaultAppPath = join(appOutDir, 'resources', 'default_app.asar')
     const applicationAsarPath = join(appOutDir, 'resources', 'app.asar')
+    const unrelatedPath = join(unrelatedDirectory, 'keep.txt')
 
     try {
       mkdirSync(dirname(defaultAppPath), { recursive: true })
       writeFileSync(defaultAppPath, 'default app')
       writeFileSync(applicationAsarPath, 'application')
       writeFileSync(join(appOutDir, 'version'), '43.1.0')
+      writeFileSync(unrelatedPath, 'keep')
 
-      const hookUrl = pathToFileURL(afterExtractPath).href
-      execFileSync(
-        process.execPath,
-        [
-          '--input-type=module',
-          '--eval',
-          `import hook from ${JSON.stringify(hookUrl)}; await hook({ appOutDir: process.argv[1] });`,
-          appOutDir,
-        ],
-      )
+      await runAfterPack({
+        appOutDir,
+        electronPlatformName: 'win32',
+        packager: { appInfo: { productFilename: 'Mojian Story Planner' } },
+      })
+
+      expect(existsSync(defaultAppPath)).toBe(false)
+      expect(existsSync(join(appOutDir, 'version'))).toBe(false)
+      expect(existsSync(applicationAsarPath)).toBe(true)
+      expect(existsSync(unrelatedPath)).toBe(true)
+    } finally {
+      rmSync(appOutDir, { recursive: true, force: true })
+      rmSync(unrelatedDirectory, { recursive: true, force: true })
+    }
+  })
+
+  it('uses the final product bundle name for macOS runtime metadata', async () => {
+    expect(existsSync(afterPackPath)).toBe(true)
+    if (!existsSync(afterPackPath)) return
+
+    const appOutDir = mkdtempSync(join(tmpdir(), 'mojian-after-pack-mac-'))
+    const productFilename = 'Mojian Story Planner'
+    const resourcesDirectory = join(
+      appOutDir,
+      `${productFilename}.app`,
+      'Contents',
+      'Resources',
+    )
+    const defaultAppPath = join(resourcesDirectory, 'default_app.asar')
+    const applicationAsarPath = join(resourcesDirectory, 'app.asar')
+
+    try {
+      mkdirSync(resourcesDirectory, { recursive: true })
+      writeFileSync(defaultAppPath, 'default app')
+      writeFileSync(applicationAsarPath, 'application')
+      writeFileSync(join(appOutDir, 'version'), '43.1.0')
+
+      await runAfterPack({
+        appOutDir,
+        electronPlatformName: 'darwin',
+        packager: { appInfo: { productFilename } },
+      })
 
       expect(existsSync(defaultAppPath)).toBe(false)
       expect(existsSync(join(appOutDir, 'version'))).toBe(false)
       expect(existsSync(applicationAsarPath)).toBe(true)
     } finally {
       rmSync(appOutDir, { recursive: true, force: true })
+    }
+  })
+
+  it('rejects a macOS product filename that escapes appOutDir', async () => {
+    expect(existsSync(afterPackPath)).toBe(true)
+    if (!existsSync(afterPackPath)) return
+
+    const fixtureRoot = mkdtempSync(join(tmpdir(), 'mojian-after-pack-safe-'))
+    const appOutDir = join(fixtureRoot, 'app-out')
+    const escapedPath = join(fixtureRoot, 'outside.app', 'Contents', 'Resources')
+
+    try {
+      mkdirSync(appOutDir)
+      mkdirSync(escapedPath, { recursive: true })
+      writeFileSync(join(escapedPath, 'default_app.asar'), 'keep')
+
+      await expect(
+        runAfterPack({
+          appOutDir,
+          electronPlatformName: 'darwin',
+          packager: { appInfo: { productFilename: '../outside' } },
+        }),
+      ).rejects.toThrow(/outside appOutDir/)
+      expect(existsSync(join(escapedPath, 'default_app.asar'))).toBe(true)
+    } finally {
+      rmSync(fixtureRoot, { recursive: true, force: true })
     }
   })
 })

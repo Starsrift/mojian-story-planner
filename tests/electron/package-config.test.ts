@@ -4,13 +4,17 @@ import { resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
 
 type BuilderConfig = {
-  afterExtract?: string
+  afterPack?: string
   appId?: string
   artifactName?: string
   electronDist?: string
   directories?: { output?: string }
   files?: string[]
-  win?: { target?: string[] }
+  win?: {
+    signAndEditExecutable?: boolean
+    signExecutable?: boolean
+    target?: string[]
+  }
   mac?: { category?: string; target?: string[] }
   nsis?: { oneClick?: boolean; perMachine?: boolean }
 }
@@ -49,7 +53,7 @@ describe('Electron packaging metadata', () => {
       '!node_modules/**',
     ])
     expect(packageConfig.build?.directories?.output).toBe('release')
-    expect(packageConfig.build?.afterExtract).toBe('scripts/after-extract.mjs')
+    expect(packageConfig.build?.afterPack).toBe('scripts/after-pack.mjs')
   })
 
   it('packages the installed Electron runtime without downloading another archive', () => {
@@ -68,6 +72,8 @@ describe('Electron packaging metadata', () => {
 
   it('configures Windows NSIS and ZIP distributions', () => {
     expect(packageConfig.build?.win?.target).toEqual(['nsis', 'zip'])
+    expect(packageConfig.build?.win?.signExecutable).toBe(false)
+    expect(packageConfig.build?.win?.signAndEditExecutable).toBeUndefined()
     expect(packageConfig.build?.nsis).toMatchObject({
       oneClick: false,
       perMachine: false,
@@ -89,7 +95,7 @@ describe('Electron packaging scripts', () => {
       const script = packageConfig.scripts?.[scriptName]
 
       expect(script).toContain(
-        'npm run build && npm run build:electron && npm run clean:release && electron-builder',
+        'npm run build && npm run build:electron && npm run clean:release &&',
       )
     },
   )
@@ -101,8 +107,10 @@ describe('Electron packaging scripts', () => {
   it('builds host-native macOS artifacts without cross-labeling architectures', () => {
     const script = packageConfig.scripts?.['dist:mac']
 
-    expect(script).toContain('--mac dmg zip')
-    expect(script).not.toMatch(/--(?:x64|arm64|universal)/)
+    expect(script).toContain(
+      'npm run build && npm run build:electron && npm run clean:release && node scripts/package-mac.mjs',
+    )
+    expect(script).not.toContain('electron-builder --mac')
   })
 
   it('cleans only the configured release directory before packaging', () => {

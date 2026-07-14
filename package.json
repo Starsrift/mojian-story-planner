@@ -18,7 +18,7 @@
     "electron:build": "npm run build && npm run build:electron && npm run clean:release && electron-builder",
     "electron:dev": "node scripts/electron-dev.mjs",
     "dist:win": "npm run build && npm run build:electron && npm run clean:release && electron-builder --win nsis zip --x64",
-    "dist:mac": "npm run build && npm run build:electron && npm run clean:release && electron-builder --mac dmg zip",
+    "dist:mac": "npm run build && npm run build:electron && npm run clean:release && node scripts/package-mac.mjs",
     "preview": "vite preview",
     "test": "vitest",
     "test:run": "vitest run"
@@ -49,7 +49,7 @@
   "build": {
     "appId": "com.starsrift.mojian",
     "artifactName": "mojian-story-planner-${version}-${os}-${arch}.${ext}",
-    "afterExtract": "scripts/after-extract.mjs",
+    "afterPack": "scripts/after-pack.mjs",
     "electronDist": "node_modules/electron/dist",
     "directories": {
       "output": "release"
@@ -64,6 +64,7 @@
       "!node_modules/**"
     ],
     "win": {
+      "signExecutable": false,
       "target": [
         "nsis",
         "zip"
