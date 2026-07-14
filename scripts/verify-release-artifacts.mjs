@@ -2,12 +2,12 @@ import { createHash } from 'node:crypto'
 import { createReadStream } from 'node:fs'
 import { readdir, stat, writeFile } from 'node:fs/promises'
 import { basename, relative, resolve } from 'node:path'
-import { pathToFileURL } from 'node:url'
 
 const PRODUCT_NAME = 'mojian-story-planner'
 const CHECKSUM_FILENAME = 'SHA256SUMS.txt'
 const PLATFORM_EXTENSIONS = {
   mac: ['dmg', 'zip'],
+  web: ['zip'],
   win: ['exe', 'zip'],
 }
 const SUPPORTED_ARCHITECTURES = new Set(['arm64', 'x64'])
@@ -20,9 +20,16 @@ function assertSafeSegment(label, value) {
 
 export function expectedArtifactNames({ arch, platform, version }) {
   if (!(platform in PLATFORM_EXTENSIONS)) {
-    throw new Error(`Unsupported platform ${JSON.stringify(platform)}; expected win or mac`)
+    throw new Error(
+      `Unsupported platform ${JSON.stringify(platform)}; expected win, mac, or web`,
+    )
   }
-  if (!SUPPORTED_ARCHITECTURES.has(arch)) {
+  if (platform === 'web' && arch !== 'any') {
+    throw new Error(
+      `Unsupported architecture ${JSON.stringify(arch)} for web; expected any`,
+    )
+  }
+  if (platform !== 'web' && !SUPPORTED_ARCHITECTURES.has(arch)) {
     throw new Error(
       `Unsupported architecture ${JSON.stringify(arch)}; expected x64 or arm64`,
     )
@@ -37,11 +44,13 @@ export function expectedArtifactNames({ arch, platform, version }) {
     .sort()
 }
 
-function looksLikeReleaseArtifact(name) {
-  if (name.endsWith('.blockmap')) return false
+function isKnownAuxiliaryEntry(name) {
   return (
-    name.startsWith(`${PRODUCT_NAME}-`) &&
-    /\.(?:dmg|exe|zip)(?:$|[. (_-])/i.test(name)
+    name === CHECKSUM_FILENAME ||
+    name === 'builder-debug.yml' ||
+    name === 'builder-effective-config.yaml' ||
+    name.endsWith('.blockmap') ||
+    name.endsWith('-unpacked')
   )
 }
 
@@ -56,7 +65,7 @@ export function validateArtifactNames({ arch, entries, platform, version }) {
   }
 
   const unexpected = entries
-    .filter((name) => looksLikeReleaseArtifact(name) && !expected.includes(name))
+    .filter((name) => !expected.includes(name) && !isKnownAuxiliaryEntry(name))
     .sort()
   if (unexpected.length > 0) {
     throw new Error(
@@ -103,7 +112,9 @@ export async function verifyReleaseArtifacts({ arch, dir, platform, version }) {
   const directoryEntries = await readdir(directory, { withFileTypes: true })
   const artifactNames = validateArtifactNames({
     arch,
-    entries: directoryEntries.map((entry) => entry.name),
+    entries: directoryEntries
+      .filter((entry) => !entry.isDirectory())
+      .map((entry) => entry.name),
     platform,
     version,
   })
@@ -133,7 +144,7 @@ export function parseArguments(argv) {
     const value = argv[index + 1]
     if (!['--arch', '--dir', '--platform', '--version'].includes(flag) || !value) {
       throw new Error(
-        'Usage: node scripts/verify-release-artifacts.mjs --platform <win|mac> --version <version> --arch <x64|arm64> --dir <directory>',
+        'Usage: node scripts/verify-release-artifacts.mjs --platform <win|mac|web> --version <version> --arch <x64|arm64|any> --dir <directory>',
       )
     }
     const key = flag.slice(2)
@@ -159,8 +170,7 @@ export async function main(argv = process.argv.slice(2)) {
   return result
 }
 
-const invokedPath = process.argv[1] ? pathToFileURL(resolve(process.argv[1])).href : ''
-if (import.meta.url === invokedPath) {
+if (import.meta.main) {
   main().catch((error) => {
     console.error(`Release artifact validation failed: ${error.message}`)
     process.exitCode = 1
