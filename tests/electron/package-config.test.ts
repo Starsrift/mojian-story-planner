@@ -104,6 +104,15 @@ describe('Electron packaging scripts', () => {
     expect(packageConfig.scripts?.['dist:win']).toContain('--win nsis zip --x64')
   })
 
+  it('routes generic desktop packaging through the native dispatcher', () => {
+    const script = packageConfig.scripts?.['electron:build']
+
+    expect(script).toBe(
+      'npm run build && npm run build:electron && npm run clean:release && node scripts/package-electron.mjs',
+    )
+    expect(script).not.toContain('electron-builder')
+  })
+
   it('builds host-native macOS artifacts without cross-labeling architectures', () => {
     const script = packageConfig.scripts?.['dist:mac']
 

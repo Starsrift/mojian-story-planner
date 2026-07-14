@@ -15,7 +15,7 @@
     "build": "tsc && vite build",
     "build:electron": "node scripts/build-electron.mjs",
     "clean:release": "node scripts/clean-release.mjs",
-    "electron:build": "npm run build && npm run build:electron && npm run clean:release && electron-builder",
+    "electron:build": "npm run build && npm run build:electron && npm run clean:release && node scripts/package-electron.mjs",
     "electron:dev": "node scripts/electron-dev.mjs",
     "dist:win": "npm run build && npm run build:electron && npm run clean:release && electron-builder --win nsis zip --x64",
     "dist:mac": "npm run build && npm run build:electron && npm run clean:release && node scripts/package-mac.mjs",
