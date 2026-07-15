@@ -11,15 +11,12 @@ jobs:
   windows:
     name: Windows release assets
     runs-on: windows-latest
-    env:
-      WIN_CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
-      WIN_CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
 
       - name: Set up Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
           node-version: "24"
           cache: npm
@@ -27,12 +24,14 @@ jobs:
       - name: Read release version
         id: version
         shell: pwsh
+        env:
+          REF_NAME: ${{ github.ref_name }}
         run: |
-          $version = $env:GITHUB_REF_NAME.Substring(1)
-          if ([string]::IsNullOrWhiteSpace($version)) {
-            throw 'Release tag must include a version after v'
+          $semverTagPattern = '^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(?:-(?:(?:0|[1-9][0-9]*)|(?:[0-9A-Za-z-]*[A-Za-z-][0-9A-Za-z-]*))(?:\.(?:(?:0|[1-9][0-9]*)|(?:[0-9A-Za-z-]*[A-Za-z-][0-9A-Za-z-]*)))*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$'
+          if ($env:REF_NAME -notmatch $semverTagPattern) {
+            throw "Release tag must be strict SemVer with a v prefix; received $env:REF_NAME"
           }
-          "version=$version" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "version=$($env:REF_NAME.Substring(1))" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
 
       - name: Install dependencies
         run: npm ci
@@ -42,26 +41,36 @@ jobs:
 
       - name: Set package version for this runner
         shell: pwsh
-        run: npm pkg set "version=${{ steps.version.outputs.version }}"
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: npm pkg set "version=$env:VERSION"
 
       - name: Run tests
         run: npm run test:run
 
-      - name: Enable Windows signing
-        if: ${{ env.WIN_CSC_LINK != '' }}
+      - name: Detect Windows signing certificate
+        id: signing
         env:
-          CSC_KEY_PASSWORD: ${{ env.WIN_CSC_KEY_PASSWORD }}
-          CSC_LINK: ${{ env.WIN_CSC_LINK }}
+          WIN_CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
+        shell: pwsh
+        run: |
+          $enabled = -not [string]::IsNullOrWhiteSpace($env:WIN_CSC_LINK)
+          "enabled=$($enabled.ToString().ToLowerInvariant())" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+
+      - name: Build signed Windows installer and archive
+        if: ${{ steps.signing.outputs.enabled == 'true' }}
+        env:
+          CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
+          CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
         shell: pwsh
         run: |
           $package = Get-Content package.json -Raw | ConvertFrom-Json
           $package.build.win.signExecutable = $true
           $package | ConvertTo-Json -Depth 100 | Set-Content package.json -Encoding utf8
+          npm run dist:win
 
-      - name: Build Windows installer and archive
-        env:
-          CSC_KEY_PASSWORD: ${{ env.WIN_CSC_KEY_PASSWORD }}
-          CSC_LINK: ${{ env.WIN_CSC_LINK }}
+      - name: Build unsigned Windows installer and archive
+        if: ${{ steps.signing.outputs.enabled != 'true' }}
         run: npm run dist:win
 
       - name: Stage Windows release assets
@@ -91,30 +100,40 @@ jobs:
         run: npm run verify:release -- --platform win --version $env:VERSION --arch x64 --dir release-validation\win
 
       - name: Upload validated Windows release assets
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: windows-release-assets
           if-no-files-found: error
           path: |
             release-validation/win/*.exe
             release-validation/win/*.zip
+            release-validation/win/*.blockmap
 
   macos:
     name: macOS release assets
     runs-on: macos-latest
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
 
       - name: Set up Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
           node-version: "24"
           cache: npm
 
       - name: Read release version
         id: version
-        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+        env:
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          semver_tag_pattern='^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(?:-(?:(?:0|[1-9][0-9]*)|(?:[0-9A-Za-z-]*[A-Za-z-][0-9A-Za-z-]*))(?:\.(?:(?:0|[1-9][0-9]*)|(?:[0-9A-Za-z-]*[A-Za-z-][0-9A-Za-z-]*)))*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$'
+          if [[ ! "$REF_NAME" =~ $semver_tag_pattern ]]; then
+            echo "Release tag must be strict SemVer with a v prefix: $REF_NAME" >&2
+            exit 1
+          fi
+          printf 'version=%s\n' "${REF_NAME#v}" >> "$GITHUB_OUTPUT"
 
       - name: Install dependencies
         run: npm ci
@@ -123,18 +142,39 @@ jobs:
         run: npm run install:electron
 
       - name: Set package version for this runner
-        run: npm pkg set "version=${{ steps.version.outputs.version }}"
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: npm pkg set "version=$VERSION"
 
       - name: Run tests
         run: npm run test:run
 
-      - name: Build macOS disk image and archive
+      - name: Detect macOS signing certificate
+        id: signing
+        env:
+          MAC_CSC_LINK: ${{ secrets.MAC_CSC_LINK }}
+        run: |
+          set -euo pipefail
+          if [[ -n "$MAC_CSC_LINK" ]]; then
+            echo 'enabled=true' >> "$GITHUB_OUTPUT"
+          else
+            echo 'enabled=false' >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Build signed macOS disk image and archive
+        if: ${{ steps.signing.outputs.enabled == 'true' }}
         env:
           APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
           CSC_KEY_PASSWORD: ${{ secrets.MAC_CSC_KEY_PASSWORD }}
           CSC_LINK: ${{ secrets.MAC_CSC_LINK }}
+        run: npm run dist:mac
+
+      - name: Build unsigned macOS disk image and archive
+        if: ${{ steps.signing.outputs.enabled != 'true' }}
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
         run: npm run dist:mac
 
       - name: Stage macOS release assets
@@ -179,30 +219,40 @@ jobs:
         run: npm run verify:release -- --platform mac --version "$VERSION" --arch "$ARCH" --dir release-validation/macos
 
       - name: Upload validated macOS release assets
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: macos-release-assets
           if-no-files-found: error
           path: |
             release-validation/macos/*.dmg
             release-validation/macos/*.zip
+            release-validation/macos/*.blockmap
 
   web:
     name: Web release asset
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
 
       - name: Set up Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
           node-version: "24"
           cache: npm
 
       - name: Read release version
         id: version
-        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+        env:
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          semver_tag_pattern='^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(?:-(?:(?:0|[1-9][0-9]*)|(?:[0-9A-Za-z-]*[A-Za-z-][0-9A-Za-z-]*))(?:\.(?:(?:0|[1-9][0-9]*)|(?:[0-9A-Za-z-]*[A-Za-z-][0-9A-Za-z-]*)))*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$'
+          if [[ ! "$REF_NAME" =~ $semver_tag_pattern ]]; then
+            echo "Release tag must be strict SemVer with a v prefix: $REF_NAME" >&2
+            exit 1
+          fi
+          printf 'version=%s\n' "${REF_NAME#v}" >> "$GITHUB_OUTPUT"
 
       - name: Install dependencies
         run: npm ci
@@ -211,7 +261,9 @@ jobs:
         run: npm run install:electron
 
       - name: Set package version for this runner
-        run: npm pkg set "version=${{ steps.version.outputs.version }}"
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: npm pkg set "version=$VERSION"
 
       - name: Run tests
         run: npm run test:run
@@ -233,11 +285,11 @@ jobs:
         run: npm run verify:release -- --platform web --version $VERSION --arch any --dir release-validation/web
 
       - name: Upload validated web release asset
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: web-release-asset
           if-no-files-found: error
-          path: release-validation/web/mojian-story-planner-${{ steps.version.outputs.version }}-web-any.zip
+          path: release-validation/web/*.zip
 
   publish:
     name: Publish GitHub release
@@ -247,10 +299,10 @@ jobs:
       contents: write
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
 
       - name: Set up Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
           node-version: "24"
 
@@ -259,22 +311,31 @@ jobs:
 
       - name: Read release version
         id: version
-        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+        env:
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          semver_tag_pattern='^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(?:-(?:(?:0|[1-9][0-9]*)|(?:[0-9A-Za-z-]*[A-Za-z-][0-9A-Za-z-]*))(?:\.(?:(?:0|[1-9][0-9]*)|(?:[0-9A-Za-z-]*[A-Za-z-][0-9A-Za-z-]*)))*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$'
+          if [[ ! "$REF_NAME" =~ $semver_tag_pattern ]]; then
+            echo "Release tag must be strict SemVer with a v prefix: $REF_NAME" >&2
+            exit 1
+          fi
+          printf 'version=%s\n' "${REF_NAME#v}" >> "$GITHUB_OUTPUT"
 
       - name: Download Windows release assets
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
           name: windows-release-assets
           path: publish/windows
 
       - name: Download macOS release assets
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
           name: macos-release-assets
           path: publish/macos
 
       - name: Download web release asset
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
           name: web-release-asset
           path: publish/web
@@ -312,23 +373,77 @@ jobs:
           fi
           cat "${manifest_files[@]}" | LC_ALL=C sort > publish/SHA256SUMS.txt
 
-      - name: Create GitHub release
+      - name: Prepare draft release for retry and create draft GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.version.outputs.version }}
         run: |
           set -euo pipefail
+          existing_release="$(gh release view "v$VERSION" --json isDraft --jq '.isDraft' 2>/dev/null || true)"
+          if [[ -n "$existing_release" ]]; then
+            if [[ "$existing_release" != "true" ]]; then
+              echo "Release v$VERSION already exists and is published; refusing to overwrite it." >&2
+              exit 1
+            fi
+            gh release delete "v$VERSION" --yes
+          fi
           cat > publish/release-notes.md <<'EOF'
           ## Mojian Story Planner release
 
           Unsigned builds are published when signing secrets are not configured.
           Verify downloaded files against `SHA256SUMS.txt` before installing.
           EOF
-          gh release create "$GITHUB_REF_NAME" \
-            --title "$GITHUB_REF_NAME" \
+          gh release create "v$VERSION" \
+            --draft \
+            --title "v$VERSION" \
             --notes-file publish/release-notes.md \
-            publish/windows/*.exe \
-            publish/windows/*.zip \
-            publish/macos/*.dmg \
-            publish/macos/*.zip \
-            publish/web/*.zip \
-            publish/SHA256SUMS.txt
+            --verify-tag
+
+      - name: Upload verified release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          release_files=(
+             publish/windows/*.exe
+             publish/windows/*.zip
+             publish/windows/*.blockmap
+             publish/macos/*.dmg
+             publish/macos/*.zip
+             publish/macos/*.blockmap
+             publish/web/*.zip
+             publish/SHA256SUMS.txt
+          )
+          gh release upload "v$VERSION" "${release_files[@]}"
+
+      - name: Verify draft release asset set
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          expected_assets="$(mktemp)"
+          uploaded_assets="$(mktemp)"
+          trap 'rm -f "$expected_assets" "$uploaded_assets"' EXIT
+          release_files=(
+             publish/windows/*.exe
+             publish/windows/*.zip
+             publish/windows/*.blockmap
+             publish/macos/*.dmg
+             publish/macos/*.zip
+             publish/macos/*.blockmap
+             publish/web/*.zip
+             publish/SHA256SUMS.txt
+          )
+          printf '%s\n' "${release_files[@]##*/}" | LC_ALL=C sort > "$expected_assets"
+          gh release view "v$VERSION" --json assets --jq '.assets[].name' | LC_ALL=C sort > "$uploaded_assets"
+          diff -u "$expected_assets" "$uploaded_assets"
+
+      - name: Publish GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: gh release edit "v$VERSION" --draft=false

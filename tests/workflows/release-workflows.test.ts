@@ -28,6 +28,15 @@ type Step = {
   with?: Record<string, string>;
 };
 
+const ACTION_PINS = {
+  checkout: "actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5",
+  downloadArtifact:
+    "actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093",
+  setupNode: "actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020",
+  uploadArtifact:
+    "actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02",
+} as const;
+
 const root = process.cwd();
 const packageConfig = JSON.parse(
   readFileSync(resolve(root, "package.json"), "utf8"),
@@ -76,6 +85,12 @@ function stepIndexWithUse(value: Job, action: string): number {
   return index;
 }
 
+function runBlocks(value: Job): string[] {
+  return steps(value)
+    .map((step) => step.run)
+    .filter((run): run is string => typeof run === "string");
+}
+
 describe("continuous integration workflow", () => {
   it("runs verified application checks on pull requests and main pushes", () => {
     const { workflow } = readWorkflow("ci.yml");
@@ -89,7 +104,7 @@ describe("continuous integration workflow", () => {
     expect(steps(build)).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
-          uses: "actions/setup-node@v4",
+          uses: ACTION_PINS.setupNode,
           with: expect.objectContaining({ "node-version": "24" }),
         }),
       ]),
@@ -104,7 +119,50 @@ describe("continuous integration workflow", () => {
     );
     expect(stepWithRun(build, "npm run test:run")).toBeDefined();
     expect(stepWithRun(build, "npm run build")).toBeDefined();
+    expect(stepWithRun(build, "npm run audit:production")).toBeDefined();
     expect(stepWithRun(build, "npm run check:workflows")).toBeDefined();
+  });
+});
+
+describe("workflow action pinning", () => {
+  it("uses the approved immutable action revisions in every workflow", () => {
+    for (const filename of [
+      "ci.yml",
+      "release.yml",
+      "update-star-history.yml",
+    ]) {
+      const { source } = readWorkflow(filename);
+
+      expect(source).not.toMatch(
+        /actions\/(?:checkout|setup-node|upload-artifact|download-artifact)@v4/,
+      );
+    }
+
+    const { workflow: ci } = readWorkflow("ci.yml");
+    const { workflow: release } = readWorkflow("release.yml");
+    const { workflow: starHistory } = readWorkflow("update-star-history.yml");
+    const allSteps = [
+      ...steps(job(ci, "build")),
+      ...Object.values(release.jobs ?? {}).flatMap(steps),
+      ...steps(job(starHistory, "update")),
+    ];
+
+    for (const [prefix, expectedPin] of [
+      ["actions/checkout@", ACTION_PINS.checkout],
+      ["actions/setup-node@", ACTION_PINS.setupNode],
+      ["actions/upload-artifact@", ACTION_PINS.uploadArtifact],
+      ["actions/download-artifact@", ACTION_PINS.downloadArtifact],
+    ]) {
+      const actionSteps = allSteps.filter((step) =>
+        step.uses?.startsWith(prefix),
+      );
+
+      expect(
+        actionSteps.length,
+        `expected at least one ${prefix} step`,
+      ).toBeGreaterThan(0);
+      expect(actionSteps.every((step) => step.uses === expectedPin)).toBe(true);
+    }
   });
 });
 
@@ -124,10 +182,33 @@ describe("Electron runtime installation", () => {
       );
     }
     expect(packageConfig.scripts?.build).not.toContain("install:electron");
+    expect(packageConfig.scripts?.["audit:production"]).toBe(
+      "npm audit --omit=dev --audit-level=high",
+    );
   });
 });
 
 describe("desktop release workflow", () => {
+  it.each(["windows", "macos", "web", "publish"])(
+    "%s validates a tag from REF_NAME without interpolating expressions in run blocks",
+    (jobName) => {
+      const { workflow } = readWorkflow("release.yml");
+      const releaseJob = job(workflow, jobName);
+      const versionStep = steps(releaseJob).find(
+        (step) => step.name === "Read release version",
+      );
+
+      expect(versionStep?.env).toEqual({ REF_NAME: "${{ github.ref_name }}" });
+      expect(versionStep?.run).toContain("REF_NAME");
+      expect(versionStep?.run).toContain("GITHUB_OUTPUT");
+      expect(versionStep?.run).toMatch(/semver/i);
+      for (const run of runBlocks(releaseJob)) {
+        expect(run).not.toContain("${{");
+        expect(run).not.toContain("GITHUB_REF_NAME");
+      }
+    },
+  );
+
   it.each(["windows", "macos", "web"])(
     "%s installs Electron after npm ci and before tests or builds",
     (jobName) => {
@@ -176,38 +257,69 @@ describe("desktop release workflow", () => {
     expect(stepWithRun(windows, "--platform win")).toBeDefined();
     expect(stepWithRun(windows, "release-validation\\win")).toBeDefined();
     expect(stepIndexWithRun(windows, "--platform win")).toBeLessThan(
-      stepIndexWithUse(windows, "actions/upload-artifact@v4"),
+      stepIndexWithUse(windows, ACTION_PINS.uploadArtifact),
     );
     expect(source).toContain("release-validation/win/*.exe");
     expect(source).toContain("release-validation/win/*.zip");
+    expect(source).toContain("release-validation/win/*.blockmap");
     expect(source).not.toContain("release-validation/win/**");
   });
 
-  it("keeps Windows unsigned by default and enables certificate signing only when supplied", () => {
+  it("keeps Windows secrets isolated to a signed packaging branch", () => {
     const { workflow } = readWorkflow("release.yml");
     const windows = job(workflow, "windows");
     const packageConfig = JSON.parse(
       readFileSync(resolve(root, "package.json"), "utf8"),
     );
-    const signingStep = steps(windows).find(
-      (step) => step.name === "Enable Windows signing",
+    const detectionStep = steps(windows).find(
+      (step) => step.name === "Detect Windows signing certificate",
     );
-    const packageStep = stepWithRun(windows, "npm run dist:win");
+    const signedPackageStep = steps(windows).find(
+      (step) => step.name === "Build signed Windows installer and archive",
+    );
+    const unsignedPackageStep = steps(windows).find(
+      (step) => step.name === "Build unsigned Windows installer and archive",
+    );
 
     expect(packageConfig.build.win.signExecutable).toBe(false);
-    expect(signingStep).toMatchObject({ if: "${{ env.WIN_CSC_LINK != '' }}" });
-    expect(signingStep?.env).toMatchObject({
-      CSC_LINK: "${{ env.WIN_CSC_LINK }}",
+    expect(windows.env).toBeUndefined();
+    expect(detectionStep?.env).toEqual({
+      WIN_CSC_LINK: "${{ secrets.WIN_CSC_LINK }}",
     });
-    expect(packageStep.env).toMatchObject({
-      CSC_LINK: "${{ env.WIN_CSC_LINK }}",
+    expect(detectionStep?.run).toContain("enabled=$");
+    expect(detectionStep?.run).toContain("ToLowerInvariant");
+    expect(signedPackageStep).toMatchObject({
+      if: "${{ steps.signing.outputs.enabled == 'true' }}",
+      env: {
+        CSC_KEY_PASSWORD: "${{ secrets.WIN_CSC_KEY_PASSWORD }}",
+        CSC_LINK: "${{ secrets.WIN_CSC_LINK }}",
+      },
     });
+    expect(unsignedPackageStep).toMatchObject({
+      if: "${{ steps.signing.outputs.enabled != 'true' }}",
+    });
+    expect(unsignedPackageStep?.env).toBeUndefined();
+    for (const step of steps(windows).filter(
+      (step) =>
+        step.name !== "Detect Windows signing certificate" &&
+        step.name !== "Build signed Windows installer and archive",
+    )) {
+      expect(JSON.stringify(step.env ?? {})).not.toContain("secrets.WIN_CSC_");
+    }
   });
 
-  it("runs macOS packaging natively, validates the architecture detected from its artifacts, and maps optional signing inputs", () => {
+  it("runs macOS packaging natively, validates the architecture detected from its artifacts, and gates optional signing inputs", () => {
     const { workflow, source } = readWorkflow("release.yml");
     const macos = job(workflow, "macos");
-    const packageStep = stepWithRun(macos, "npm run dist:mac");
+    const signingStep = steps(macos).find(
+      (step) => step.name === "Detect macOS signing certificate",
+    );
+    const signedPackageStep = steps(macos).find(
+      (step) => step.name === "Build signed macOS disk image and archive",
+    );
+    const unsignedPackageStep = steps(macos).find(
+      (step) => step.name === "Build unsigned macOS disk image and archive",
+    );
 
     expect(macos["runs-on"]).toBe("macos-latest");
     expect(stepWithRun(macos, "npm ci")).toBeDefined();
@@ -221,17 +333,28 @@ describe("desktop release workflow", () => {
     expect(stepWithRun(macos, "--platform mac")).toBeDefined();
     expect(stepWithRun(macos, "mac-*.dmg")).toBeDefined();
     expect(stepIndexWithRun(macos, "--platform mac")).toBeLessThan(
-      stepIndexWithUse(macos, "actions/upload-artifact@v4"),
+      stepIndexWithUse(macos, ACTION_PINS.uploadArtifact),
     );
-    expect(packageStep.env).toMatchObject({
-      APPLE_ID: "${{ secrets.APPLE_ID }}",
-      APPLE_APP_SPECIFIC_PASSWORD: "${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}",
-      APPLE_TEAM_ID: "${{ secrets.APPLE_TEAM_ID }}",
-      CSC_LINK: "${{ secrets.MAC_CSC_LINK }}",
-      CSC_KEY_PASSWORD: "${{ secrets.MAC_CSC_KEY_PASSWORD }}",
+    expect(signingStep?.env).toEqual({
+      MAC_CSC_LINK: "${{ secrets.MAC_CSC_LINK }}",
+    });
+    expect(signedPackageStep).toMatchObject({
+      if: "${{ steps.signing.outputs.enabled == 'true' }}",
+      env: {
+        APPLE_ID: "${{ secrets.APPLE_ID }}",
+        APPLE_APP_SPECIFIC_PASSWORD: "${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}",
+        APPLE_TEAM_ID: "${{ secrets.APPLE_TEAM_ID }}",
+        CSC_LINK: "${{ secrets.MAC_CSC_LINK }}",
+        CSC_KEY_PASSWORD: "${{ secrets.MAC_CSC_KEY_PASSWORD }}",
+      },
+    });
+    expect(unsignedPackageStep).toMatchObject({
+      if: "${{ steps.signing.outputs.enabled != 'true' }}",
+      env: { CSC_IDENTITY_AUTO_DISCOVERY: "false" },
     });
     expect(source).toContain("release-validation/macos/*.dmg");
     expect(source).toContain("release-validation/macos/*.zip");
+    expect(source).toContain("release-validation/macos/*.blockmap");
   });
 
   it("builds the web bundle on Ubuntu, names it web-any, and validates it before upload", () => {
@@ -254,14 +377,18 @@ describe("desktop release workflow", () => {
       stepWithRun(web, "--platform web --version $VERSION --arch any"),
     ).toBeDefined();
     expect(stepIndexWithRun(web, "--platform web")).toBeLessThan(
-      stepIndexWithUse(web, "actions/upload-artifact@v4"),
+      stepIndexWithUse(web, ACTION_PINS.uploadArtifact),
     );
+    const uploadStep = steps(web).find(
+      (step) => step.uses === ACTION_PINS.uploadArtifact,
+    );
+    expect(uploadStep?.with?.path).toBe("release-validation/web/*.zip");
     expect(source).toContain(
       "release-validation/web/mojian-story-planner-$VERSION-web-any.zip",
     );
   });
 
-  it("revalidates isolated artifact downloads before creating one complete release manifest and release", () => {
+  it("revalidates assets before atomically publishing a complete draft release", () => {
     const { workflow, source } = readWorkflow("release.yml");
     const publish = job(workflow, "publish");
 
@@ -269,26 +396,39 @@ describe("desktop release workflow", () => {
     expect(publish.permissions).toEqual({ contents: "write" });
     expect(steps(publish)).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({ uses: "actions/checkout@v4" }),
+        expect.objectContaining({ uses: ACTION_PINS.checkout }),
       ]),
     );
     expect(stepWithRun(publish, "npm ci")).toBeDefined();
     expect(source).toContain("path: publish/windows");
     expect(source).toContain("path: publish/macos");
     expect(source).toContain("path: publish/web");
-    expect(stepIndexWithRun(publish, "--platform win")).toBeLessThan(
-      stepIndexWithRun(publish, "gh release create"),
+    const createDraft = stepIndexWithRun(publish, "gh release create");
+    const uploadAssets = stepIndexWithRun(publish, "gh release upload");
+    const verifyAssets = steps(publish).findIndex(
+      (step) => step.name === "Verify draft release asset set",
     );
-    expect(stepIndexWithRun(publish, "--platform mac")).toBeLessThan(
-      stepIndexWithRun(publish, "gh release create"),
+    expect(verifyAssets).toBeGreaterThanOrEqual(0);
+    const publishDraft = stepIndexWithRun(publish, "gh release edit");
+
+    expect(stepWithRun(publish, "gh release create").run).toContain("--draft");
+    expect(createDraft).toBeLessThan(uploadAssets);
+    expect(uploadAssets).toBeLessThan(verifyAssets);
+    expect(verifyAssets).toBeLessThan(publishDraft);
+    expect(stepWithRun(publish, "gh release edit").run).toContain(
+      "--draft=false",
     );
-    expect(stepIndexWithRun(publish, "--platform web")).toBeLessThan(
-      stepIndexWithRun(publish, "gh release create"),
-    );
-    expect(stepIndexWithRun(publish, "LC_ALL=C sort")).toBeLessThan(
-      stepIndexWithRun(publish, "gh release create"),
-    );
+    expect(steps(publish)[verifyAssets].run).toContain("diff -u");
     expect(source).toContain("publish/SHA256SUMS.txt");
+    expect(source).toContain("publish/windows/*.blockmap");
+    expect(source).toContain("publish/macos/*.blockmap");
+    const retryStep = steps(publish).find((step) =>
+      step.name?.includes("draft release"),
+    );
+    expect(retryStep?.run).toContain("gh release view");
+    expect(retryStep?.run).toContain("--jq '.isDraft'");
+    expect(retryStep?.run).toContain('gh release delete "v$VERSION" --yes');
+    expect(retryStep?.run).toContain("refusing to overwrite it");
     expect(source).toContain(
       "Unsigned builds are published when signing secrets are not configured.",
     );

@@ -21,6 +21,7 @@
     "dist:mac": "npm run install:electron && npm run build && npm run build:electron && npm run clean:release && node scripts/package-mac.mjs",
     "install:electron": "node node_modules/electron/install.js",
     "preview": "vite preview",
+    "audit:production": "npm audit --omit=dev --audit-level=high",
     "check:workflows": "prettier --check \".github/workflows/*.yml\"",
     "test": "vitest",
     "test:run": "vitest run",
