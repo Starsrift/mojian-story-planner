@@ -53,7 +53,13 @@
 
 桌面产物命名格式为 `mojian-story-planner-<version>-<platform>-<arch>.<ext>`。当前构建在未配置签名 secrets 时为未签名版本，Windows 可能触发 SmartScreen，macOS 可能触发 Gatekeeper。签名与 notarization 是否启用取决于发布环境配置；SHA-256 只能帮助确认下载内容未被更改，不能替代受信任的代码签名。
 
-下载后可先校验文件，再按系统运行安装器或解压压缩包。Windows PowerShell：
+下载后可先校验文件，再按系统使用对应产物：
+
+- Windows `.exe`：运行安装器；Windows `.zip`：解压后运行其中包含的桌面应用可执行文件。
+- macOS `.dmg`：打开磁盘映像并按系统提示安装；macOS `.zip`：解压得到 `.app`，然后打开或移动到合适的位置。
+- Web `.zip`：只解压其中的 `dist/`，再通过 HTTP 或静态托管服务提供。
+
+Windows PowerShell：
 
 ```powershell
 Get-FileHash .\mojian-story-planner-<version>-win-x64.exe -Algorithm SHA256
@@ -65,11 +71,11 @@ macOS：
 shasum -a 256 mojian-story-planner-<version>-mac-<arch>.dmg
 ```
 
-将输出的哈希值与 `SHA256SUMS.txt` 中对应文件的值比较。Web fallback 不是桌面安装器，必须将解压后的 `dist/` 目录通过 HTTP 或静态托管服务提供；直接双击 `index.html` 不是可靠的使用方式。
+将输出的哈希值与 `SHA256SUMS.txt` 中对应文件的值比较。Web fallback 不是桌面安装器，直接双击 `index.html` 不是可靠的使用方式。
 
 ## 快速开始
 
-如果你下载的是 Release 压缩包，先完整解压项目目录，再使用下面对应系统的启动脚本。首次启动会根据选择安装依赖并启动本地开发服务。
+下面的启动脚本和手动启动命令仅适用于源码检出目录，不适用于 Release 平台 ZIP 或 Web ZIP。Release 产物请按上面的安装说明使用。
 
 ### macOS
 
@@ -101,7 +107,7 @@ start-windows.bat
 
 技术用户可选择 mise；普通用户可以直接使用全局 Node.js。
 
-如果从压缩包解压后双击脚本没有反应，可在项目目录中打开 PowerShell 或终端，执行手动启动命令。
+如果源码目录中的脚本没有反应，可在项目目录中打开 PowerShell 或终端，执行手动启动命令。
 
 ### 手动启动
 
