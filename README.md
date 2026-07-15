@@ -17,7 +17,7 @@
 
 墨笺不是正文生成器，而是一套面向长篇小说、剧本和复杂叙事创作的策划工具。它帮助创作者在正式写作前建立故事骨架，并在创作过程中持续检查人物关系、事件顺序、伏笔回收和世界观一致性。
 
-项目采用本地优先设计，无需注册账号。所有作品默认保存在当前浏览器的 IndexedDB 中，并支持 JSON 备份导出与恢复。
+项目采用本地优先设计，无需注册账号。所有作品默认保存在当前运行环境的 IndexedDB profile 中，并支持 JSON 备份导出与恢复。
 
 ## 核心功能
 
@@ -37,7 +37,7 @@
 - React 19 + TypeScript 6
 - Vite 8
 - Zustand：应用状态管理
-- Dexie / IndexedDB：浏览器本地持久化
+- Dexie / IndexedDB：浏览器与 Electron 本地持久化
 - React Flow：故事结构板与人物关系图
 - D3：可视化能力支持
 - mise：可选的项目级 Node.js 环境管理
@@ -49,7 +49,7 @@
 - Windows x64：`.exe` 安装器和 `.zip` 压缩包。
 - macOS：原生 `.dmg` 安装器和 `.zip` 压缩包，架构为 `arm64` 或 `x64`。
 - Web fallback：`mojian-story-planner-<version>-web-any.zip`，压缩包内包含 `dist/`。
-- `SHA256SUMS.txt`：所有发布产物的 SHA-256 校验和清单。
+- `SHA256SUMS.txt`：覆盖 Windows `.exe`、macOS `.dmg`、Windows/macOS 平台 `.zip` 和 Web `.zip` 这些主要产物的 SHA-256 校验和清单；不包括可选的 `.blockmap` 文件。
 
 桌面产物命名格式为 `mojian-story-planner-<version>-<platform>-<arch>.<ext>`。当前构建在未配置签名 secrets 时为未签名版本，Windows 可能触发 SmartScreen，macOS 可能触发 Gatekeeper。签名与 notarization 是否启用取决于发布环境配置；SHA-256 只能帮助确认下载内容未被更改，不能替代受信任的代码签名。
 
@@ -62,13 +62,13 @@
 Windows PowerShell：
 
 ```powershell
-Get-FileHash .\mojian-story-planner-<version>-win-x64.exe -Algorithm SHA256
+Get-FileHash .\mojian-story-planner-1.2.0-win-x64.exe -Algorithm SHA256
 ```
 
 macOS：
 
 ```bash
-shasum -a 256 mojian-story-planner-<version>-mac-<arch>.dmg
+shasum -a 256 mojian-story-planner-1.2.0-mac-arm64.dmg
 ```
 
 将输出的哈希值与 `SHA256SUMS.txt` 中对应文件的值比较。Web fallback 不是桌面安装器，直接双击 `index.html` 不是可靠的使用方式。
@@ -137,7 +137,7 @@ mise run dev
 ```bash
 npm install
 npm run dev             # 浏览器开发服务
-npm run preview         # 预览生产构建
+npm run build && npm run preview  # 先构建，再预览生产构建
 npm run electron:dev   # Electron 开发模式
 ```
 
@@ -160,7 +160,7 @@ npm run build:electron  # Electron 主进程与 preload，输出到 dist-electro
 ```bash
 npm run dist:win        # 原生 Windows x64 .exe 和 .zip
 npm run dist:mac        # 原生 macOS .dmg 和 .zip
-npm run electron:build  # 当前宿主系统的 Electron 目录打包
+npm run electron:build  # 当前宿主系统的完整桌面打包（安装器 + 压缩包）
 ```
 
 版本标签发布由 CI 负责生成并上传 Release 产物；本地打包结果默认写入 `release/`。
