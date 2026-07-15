@@ -44,13 +44,28 @@
 
 ## Release 安装说明
 
-墨笺的 Release 分发规则如下：
+推送版本标签后，Release 会提供以下构建产物：
 
-- `v1.0`：Release 中如提供 `.dmg` 或 `.exe`，可按系统安装器提示完成安装。
-- `v1.0` 之后：Release 仅提供压缩包形式，不再提供 `.dmg` 或 `.exe` 安装包。
-- 压缩包版本无需写入系统应用目录。下载后解压到本地目录，再按下方 macOS / Windows 启动方式运行。
+- Windows x64：`.exe` 安装器和 `.zip` 压缩包。
+- macOS：原生 `.dmg` 安装器和 `.zip` 压缩包，架构为 `arm64` 或 `x64`。
+- Web fallback：`mojian-story-planner-<version>-web-any.zip`，压缩包内包含 `dist/`。
+- `SHA256SUMS.txt`：所有发布产物的 SHA-256 校验和清单。
 
-建议解压到路径简单、可读写的位置，例如 Windows 的 `D:\Apps\mojian-story-planner`，或 macOS 用户目录下的 `~/Applications/mojian-story-planner`。
+桌面产物命名格式为 `mojian-story-planner-<version>-<platform>-<arch>.<ext>`。当前构建在未配置签名 secrets 时为未签名版本，Windows 可能触发 SmartScreen，macOS 可能触发 Gatekeeper。签名与 notarization 是否启用取决于发布环境配置；SHA-256 只能帮助确认下载内容未被更改，不能替代受信任的代码签名。
+
+下载后可先校验文件，再按系统运行安装器或解压压缩包。Windows PowerShell：
+
+```powershell
+Get-FileHash .\mojian-story-planner-<version>-win-x64.exe -Algorithm SHA256
+```
+
+macOS：
+
+```bash
+shasum -a 256 mojian-story-planner-<version>-mac-<arch>.dmg
+```
+
+将输出的哈希值与 `SHA256SUMS.txt` 中对应文件的值比较。Web fallback 不是桌面安装器，必须将解压后的 `dist/` 目录通过 HTTP 或静态托管服务提供；直接双击 `index.html` 不是可靠的使用方式。
 
 ## 快速开始
 
@@ -109,20 +124,47 @@ mise run dev
 
 浏览器访问终端中显示的本地地址即可。
 
-## 构建
+## 开发、测试与构建
+
+安装依赖后，可使用以下命令：
 
 ```bash
-npm run build
-npm run preview
+npm install
+npm run dev             # 浏览器开发服务
+npm run preview         # 预览生产构建
+npm run electron:dev   # Electron 开发模式
 ```
 
-生产文件会生成到 `dist/`。
+测试命令：
+
+```bash
+npm run test:run        # 单元测试及浏览器环境测试
+npm run test:electron   # Electron 测试
+```
+
+构建命令：
+
+```bash
+npm run build           # Web 应用，输出到 dist/
+npm run build:electron  # Electron 主进程与 preload，输出到 dist-electron/
+```
+
+原生桌面打包必须在目标操作系统上执行：
+
+```bash
+npm run dist:win        # 原生 Windows x64 .exe 和 .zip
+npm run dist:mac        # 原生 macOS .dmg 和 .zip
+npm run electron:build  # 当前宿主系统的 Electron 目录打包
+```
+
+版本标签发布由 CI 负责生成并上传 Release 产物；本地打包结果默认写入 `release/`。
 
 ## 数据与隐私
 
-- 作品数据默认只存储在当前浏览器的 IndexedDB 中。
+- 浏览器和 Electron 使用相互独立的 IndexedDB profile，数据不会自动复制或同步。
 - 项目不要求登录，也不会主动上传作品内容。
 - 清理浏览器站点数据前，请先从作品菜单导出 JSON 备份。
+- 在浏览器与 Electron 之间迁移时，请在来源环境导出 JSON，再在目标环境导入；两个方向均使用现有的 JSON 导出/导入功能。
 - 恢复备份时，墨笺会创建独立副本并重建章节、人物及关联关系，避免覆盖原作品。
 
 ## 项目结构
