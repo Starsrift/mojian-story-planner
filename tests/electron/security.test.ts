@@ -40,7 +40,9 @@ describe('Electron security policy', () => {
 
 describe('Electron development server ownership', () => {
   it('passes the URL resolved by its own dynamic Vite server to Electron', () => {
-    expect(packageJson.scripts?.['electron:dev']).toBe('node scripts/electron-dev.mjs')
+    expect(packageJson.scripts?.['electron:dev']).toBe(
+      'npm run install:electron && node scripts/electron-dev.mjs',
+    )
     expect(developmentLauncherSource).toContain(
       "import { createServer as createHttpServer } from 'node:http'",
     )

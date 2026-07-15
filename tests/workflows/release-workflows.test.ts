@@ -29,6 +29,9 @@ type Step = {
 };
 
 const root = process.cwd();
+const packageConfig = JSON.parse(
+  readFileSync(resolve(root, "package.json"), "utf8"),
+) as { scripts?: Record<string, string> };
 
 function readWorkflow(filename: string): {
   source: string;
@@ -92,13 +95,56 @@ describe("continuous integration workflow", () => {
       ]),
     );
     expect(stepWithRun(build, "npm ci")).toBeDefined();
+    expect(stepWithRun(build, "npm run install:electron")).toBeDefined();
+    expect(stepIndexWithRun(build, "npm ci")).toBeLessThan(
+      stepIndexWithRun(build, "npm run install:electron"),
+    );
+    expect(stepIndexWithRun(build, "npm run install:electron")).toBeLessThan(
+      stepIndexWithRun(build, "npm run test:run"),
+    );
     expect(stepWithRun(build, "npm run test:run")).toBeDefined();
     expect(stepWithRun(build, "npm run build")).toBeDefined();
     expect(stepWithRun(build, "npm run check:workflows")).toBeDefined();
   });
 });
 
+describe("Electron runtime installation", () => {
+  it("installs Electron explicitly for desktop flows without coupling web builds to the download", () => {
+    expect(packageConfig.scripts?.["install:electron"]).toBe(
+      "node node_modules/electron/install.js",
+    );
+    for (const scriptName of [
+      "electron:dev",
+      "electron:build",
+      "dist:win",
+      "dist:mac",
+    ]) {
+      expect(packageConfig.scripts?.[scriptName]).toContain(
+        "npm run install:electron &&",
+      );
+    }
+    expect(packageConfig.scripts?.build).not.toContain("install:electron");
+  });
+});
+
 describe("desktop release workflow", () => {
+  it.each(["windows", "macos", "web"])(
+    "%s installs Electron after npm ci and before tests or builds",
+    (jobName) => {
+      const { workflow } = readWorkflow("release.yml");
+      const buildJob = job(workflow, jobName);
+      const installIndex = stepIndexWithRun(
+        buildJob,
+        "npm run install:electron",
+      );
+
+      expect(stepIndexWithRun(buildJob, "npm ci")).toBeLessThan(installIndex);
+      expect(installIndex).toBeLessThan(
+        stepIndexWithRun(buildJob, "npm run test:run"),
+      );
+    },
+  );
+
   it("is limited to v-prefixed tags and defines every build plus publication job", () => {
     const { workflow } = readWorkflow("release.yml");
 

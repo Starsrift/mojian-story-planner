@@ -108,7 +108,7 @@ describe('Electron packaging scripts', () => {
     const script = packageConfig.scripts?.['electron:build']
 
     expect(script).toBe(
-      'npm run build && npm run build:electron && npm run clean:release && node scripts/package-electron.mjs',
+      'npm run install:electron && npm run build && npm run build:electron && npm run clean:release && node scripts/package-electron.mjs',
     )
     expect(script).not.toContain('electron-builder')
   })
