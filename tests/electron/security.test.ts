@@ -27,6 +27,7 @@ describe('Electron security policy', () => {
 
   it('blocks navigation away from the application', () => {
     expect(mainProcessSource).toContain("will-navigate")
+    expect(mainProcessSource).toContain("will-redirect")
     expect(mainProcessSource).toMatch(/event\.preventDefault\(\)/)
   })
 

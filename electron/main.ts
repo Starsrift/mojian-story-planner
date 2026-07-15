@@ -21,11 +21,17 @@ function createWindow(): void {
     },
   })
 
-  mainWindow.webContents.on('will-navigate', (event, url) => {
+  const preventUntrustedNavigation = (
+    event: { preventDefault(): void },
+    url: string,
+  ): void => {
     if (!isAllowedApplicationNavigation(url, applicationUrl)) {
       event.preventDefault()
     }
-  })
+  }
+
+  mainWindow.webContents.on('will-navigate', preventUntrustedNavigation)
+  mainWindow.webContents.on('will-redirect', preventUntrustedNavigation)
 
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
     try {
