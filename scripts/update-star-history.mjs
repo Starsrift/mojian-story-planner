@@ -1,5 +1,7 @@
 import { mkdir, writeFile } from 'node:fs/promises'
 
+import { githubRequest } from './github-api.mjs'
+
 const repository = process.env.GITHUB_REPOSITORY || 'Starsrift/mojian-story-planner'
 const token = process.env.GH_TOKEN || process.env.GITHUB_TOKEN
 
@@ -7,28 +9,22 @@ if (!token) {
   throw new Error('GH_TOKEN or GITHUB_TOKEN is required')
 }
 
-const headers = {
-  Accept: 'application/vnd.github.star+json',
-  Authorization: `Bearer ${token}`,
-  'X-GitHub-Api-Version': '2022-11-28',
-  'User-Agent': 'mojian-star-history-action',
-}
+const starAccept = 'application/vnd.github.star+json'
 
-async function github(path, accept = headers.Accept) {
-  const response = await fetch(`https://api.github.com${path}`, {
-    headers: { ...headers, Accept: accept },
+async function github(path, accept = starAccept, publicRepository = false) {
+  return githubRequest(path, {
+    accept,
+    token,
+    publicRepository,
   })
-  if (!response.ok) {
-    throw new Error(`GitHub API ${response.status}: ${await response.text()}`)
-  }
-  return response
 }
 
 const metadata = await (await github(`/repos/${repository}`, 'application/vnd.github+json')).json()
+const publicRepository = metadata.private === false
 const stars = []
 
 for (let page = 1; ; page += 1) {
-  const batch = await (await github(`/repos/${repository}/stargazers?per_page=100&page=${page}`)).json()
+  const batch = await (await github(`/repos/${repository}/stargazers?per_page=100&page=${page}`, starAccept, publicRepository)).json()
   stars.push(...batch)
   if (batch.length < 100) break
 }
