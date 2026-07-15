@@ -12,6 +12,8 @@ dist
 dist-electron/
 dist-ssr
 release/
+test-results/
+playwright-report/
 .worktrees/
 *.local
 

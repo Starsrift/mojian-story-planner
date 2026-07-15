@@ -17,6 +17,7 @@
     "clean:release": "node scripts/clean-release.mjs",
     "electron:build": "npm run install:electron && npm run build && npm run build:electron && npm run clean:release && node scripts/package-electron.mjs",
     "electron:dev": "npm run install:electron && node scripts/electron-dev.mjs",
+    "test:electron": "npm run install:electron && npm run build && npm run build:electron && playwright test --project=electron",
     "dist:win": "npm run install:electron && npm run build && npm run build:electron && npm run clean:release && electron-builder --win nsis zip --x64",
     "dist:mac": "npm run install:electron && npm run build && npm run build:electron && npm run clean:release && node scripts/package-mac.mjs",
     "install:electron": "node node_modules/electron/install.js",
@@ -29,6 +30,7 @@
   },
   "devDependencies": {
     "@electron/asar": "^3.4.1",
+    "@playwright/test": "^1.61.1",
     "@testing-library/jest-dom": "^6.9.1",
     "@types/d3": "^7.4.3",
     "@types/node": "^26.1.1",
@@ -43,6 +45,7 @@
     "esbuild": "^0.28.1",
     "fake-indexeddb": "^6.2.5",
     "jsdom": "^29.1.1",
+    "playwright": "^1.61.1",
     "prettier": "3.7.4",
     "react": "^19.2.7",
     "react-dom": "^19.2.7",

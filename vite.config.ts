@@ -20,6 +20,11 @@ export default defineConfig({
   test: {
     environment: 'jsdom',
     globals: true,
+    include: [
+      'src/**/*.{test,spec}.{js,ts,jsx,tsx}',
+      'tests/**/*.{test,spec}.{js,ts,jsx,tsx}',
+    ],
+    exclude: ['tests/electron/smoke.spec.ts'],
     setupFiles: './src/test/setup.ts',
   },
   build: {
