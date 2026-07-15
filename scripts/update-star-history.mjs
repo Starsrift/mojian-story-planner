@@ -1,6 +1,6 @@
 import { mkdir, writeFile } from 'node:fs/promises'
 
-import { githubRequest } from './github-api.mjs'
+import { fetchStarDates, githubRequest } from './github-api.mjs'
 
 const repository = process.env.GITHUB_REPOSITORY || 'Starsrift/mojian-story-planner'
 const token = process.env.GH_TOKEN || process.env.GITHUB_TOKEN
@@ -20,21 +20,14 @@ async function github(path, accept = starAccept, publicRepository = false) {
 }
 
 const metadata = await (await github(`/repos/${repository}`, 'application/vnd.github+json')).json()
-const publicRepository = metadata.private === false
-const stars = []
-
-for (let page = 1; ; page += 1) {
-  const batch = await (await github(`/repos/${repository}/stargazers?per_page=100&page=${page}`, starAccept, publicRepository)).json()
-  stars.push(...batch)
-  if (batch.length < 100) break
-}
+const starDates = await fetchStarDates(repository, { token })
 
 const createdAt = new Date(metadata.created_at)
 const today = new Date()
 const startTime = createdAt.getTime()
 const endTime = Math.max(today.getTime(), startTime + 24 * 60 * 60 * 1000)
-const datedStars = stars
-  .map((item) => new Date(item.starred_at))
+const datedStars = starDates
+  .map((starredAt) => new Date(starredAt))
   .filter((date) => !Number.isNaN(date.getTime()))
   .sort((a, b) => a.getTime() - b.getTime())
 

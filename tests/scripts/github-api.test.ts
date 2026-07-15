@@ -2,7 +2,53 @@
 
 import { describe, expect, test, vi } from 'vitest'
 
-import { githubRequest } from '../../scripts/github-api.mjs'
+import { fetchStarDates, githubRequest } from '../../scripts/github-api.mjs'
+
+describe('fetchStarDates', () => {
+  test('collects starredAt timestamps from every GraphQL page', async () => {
+    const fetchImpl = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            data: {
+              repository: {
+                stargazers: {
+                  edges: [{ starredAt: '2026-07-13T08:00:00Z' }],
+                  pageInfo: { hasNextPage: true, endCursor: 'cursor-1' },
+                },
+              },
+            },
+          }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        ),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            data: {
+              repository: {
+                stargazers: {
+                  edges: [{ starredAt: '2026-07-14T09:00:00Z' }],
+                  pageInfo: { hasNextPage: false, endCursor: null },
+                },
+              },
+            },
+          }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        ),
+      )
+
+    const dates = await fetchStarDates('Starsrift/mojian-story-planner', {
+      token: 'github-actions-token',
+      fetchImpl,
+    })
+
+    expect(dates).toEqual(['2026-07-13T08:00:00Z', '2026-07-14T09:00:00Z'])
+    expect(fetchImpl).toHaveBeenCalledTimes(2)
+    expect(JSON.parse(String(fetchImpl.mock.calls[1][1]?.body)).variables.cursor).toBe('cursor-1')
+  })
+})
 
 describe('githubRequest', () => {
   test('retries a public stargazers request anonymously after an authenticated 403', async () => {
