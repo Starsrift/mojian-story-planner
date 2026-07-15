@@ -1,0 +1,325 @@
+name: Release
+
+on:
+  push:
+    tags: [v*]
+
+permissions:
+  contents: read
+
+jobs:
+  windows:
+    name: Windows release assets
+    runs-on: windows-latest
+    env:
+      WIN_CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
+      WIN_CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+
+      - name: Read release version
+        id: version
+        shell: pwsh
+        run: |
+          $version = $env:GITHUB_REF_NAME.Substring(1)
+          if ([string]::IsNullOrWhiteSpace($version)) {
+            throw 'Release tag must include a version after v'
+          }
+          "version=$version" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Set package version for this runner
+        shell: pwsh
+        run: npm pkg set "version=${{ steps.version.outputs.version }}"
+
+      - name: Run tests
+        run: npm run test:run
+
+      - name: Enable Windows signing
+        if: ${{ env.WIN_CSC_LINK != '' }}
+        env:
+          CSC_KEY_PASSWORD: ${{ env.WIN_CSC_KEY_PASSWORD }}
+          CSC_LINK: ${{ env.WIN_CSC_LINK }}
+        shell: pwsh
+        run: |
+          $package = Get-Content package.json -Raw | ConvertFrom-Json
+          $package.build.win.signExecutable = $true
+          $package | ConvertTo-Json -Depth 100 | Set-Content package.json -Encoding utf8
+
+      - name: Build Windows installer and archive
+        env:
+          CSC_KEY_PASSWORD: ${{ env.WIN_CSC_KEY_PASSWORD }}
+          CSC_LINK: ${{ env.WIN_CSC_LINK }}
+        run: npm run dist:win
+
+      - name: Stage Windows release assets
+        shell: pwsh
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          $staging = Join-Path $pwd 'release-validation\win'
+          $assets = @(
+            "mojian-story-planner-$env:VERSION-win-x64.exe",
+            "mojian-story-planner-$env:VERSION-win-x64.zip"
+          )
+          Remove-Item -Recurse -Force $staging -ErrorAction SilentlyContinue
+          New-Item -ItemType Directory -Force $staging | Out-Null
+          foreach ($asset in $assets) {
+            Copy-Item (Join-Path $pwd "release/$asset") (Join-Path $staging $asset)
+            $blockmap = Join-Path $pwd "release/$asset.blockmap"
+            if (Test-Path -LiteralPath $blockmap) {
+              Copy-Item $blockmap (Join-Path $staging "$asset.blockmap")
+            }
+          }
+
+      - name: Validate Windows release assets
+        shell: pwsh
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: npm run verify:release -- --platform win --version $env:VERSION --arch x64 --dir release-validation\win
+
+      - name: Upload validated Windows release assets
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-release-assets
+          if-no-files-found: error
+          path: |
+            release-validation/win/*.exe
+            release-validation/win/*.zip
+
+  macos:
+    name: macOS release assets
+    runs-on: macos-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+
+      - name: Read release version
+        id: version
+        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Set package version for this runner
+        run: npm pkg set "version=${{ steps.version.outputs.version }}"
+
+      - name: Run tests
+        run: npm run test:run
+
+      - name: Build macOS disk image and archive
+        env:
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          CSC_KEY_PASSWORD: ${{ secrets.MAC_CSC_KEY_PASSWORD }}
+          CSC_LINK: ${{ secrets.MAC_CSC_LINK }}
+        run: npm run dist:mac
+
+      - name: Stage macOS release assets
+        id: stage
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          dmg_files=(release/mojian-story-planner-"$VERSION"-mac-*.dmg)
+          if [[ ${#dmg_files[@]} -ne 1 ]]; then
+            echo "Expected one macOS disk image for $VERSION, found ${#dmg_files[@]}" >&2
+            exit 1
+          fi
+          dmg_name="${dmg_files[0]##*/}"
+          arch="${dmg_name#mojian-story-planner-$VERSION-mac-}"
+          arch="${arch%.dmg}"
+          case "$arch" in
+            arm64|x64) ;;
+            *) echo "Unsupported macOS artifact architecture: $arch" >&2; exit 1 ;;
+          esac
+          zip_name="mojian-story-planner-$VERSION-mac-$arch.zip"
+          if [[ ! -f "release/$zip_name" ]]; then
+            echo "Missing macOS archive release/$zip_name" >&2
+            exit 1
+          fi
+          staging=release-validation/macos
+          rm -rf "$staging"
+          mkdir -p "$staging"
+          cp "release/$dmg_name" "release/$zip_name" "$staging/"
+          for asset in "$dmg_name" "$zip_name"; do
+            if [[ -f "release/$asset.blockmap" ]]; then
+              cp "release/$asset.blockmap" "$staging/"
+            fi
+          done
+          echo "arch=$arch" >> "$GITHUB_OUTPUT"
+
+      - name: Validate macOS release assets
+        env:
+          ARCH: ${{ steps.stage.outputs.arch }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: npm run verify:release -- --platform mac --version "$VERSION" --arch "$ARCH" --dir release-validation/macos
+
+      - name: Upload validated macOS release assets
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-release-assets
+          if-no-files-found: error
+          path: |
+            release-validation/macos/*.dmg
+            release-validation/macos/*.zip
+
+  web:
+    name: Web release asset
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+
+      - name: Read release version
+        id: version
+        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Set package version for this runner
+        run: npm pkg set "version=${{ steps.version.outputs.version }}"
+
+      - name: Run tests
+        run: npm run test:run
+
+      - name: Build web application
+        run: npm run build
+
+      - name: Create web release archive
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          mkdir -p release-validation/web
+          zip -r "release-validation/web/mojian-story-planner-$VERSION-web-any.zip" dist
+
+      - name: Validate web release asset
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: npm run verify:release -- --platform web --version $VERSION --arch any --dir release-validation/web
+
+      - name: Upload validated web release asset
+        uses: actions/upload-artifact@v4
+        with:
+          name: web-release-asset
+          if-no-files-found: error
+          path: release-validation/web/mojian-story-planner-${{ steps.version.outputs.version }}-web-any.zip
+
+  publish:
+    name: Publish GitHub release
+    needs: [windows, macos, web]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Read release version
+        id: version
+        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Download Windows release assets
+        uses: actions/download-artifact@v4
+        with:
+          name: windows-release-assets
+          path: publish/windows
+
+      - name: Download macOS release assets
+        uses: actions/download-artifact@v4
+        with:
+          name: macos-release-assets
+          path: publish/macos
+
+      - name: Download web release asset
+        uses: actions/download-artifact@v4
+        with:
+          name: web-release-asset
+          path: publish/web
+
+      - name: Revalidate downloaded release assets
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          npm run verify:release -- --platform win --version "$VERSION" --arch x64 --dir publish/windows
+          dmg_files=(publish/macos/mojian-story-planner-"$VERSION"-mac-*.dmg)
+          if [[ ${#dmg_files[@]} -ne 1 ]]; then
+            echo "Expected one downloaded macOS disk image for $VERSION, found ${#dmg_files[@]}" >&2
+            exit 1
+          fi
+          dmg_name="${dmg_files[0]##*/}"
+          mac_arch="${dmg_name#mojian-story-planner-$VERSION-mac-}"
+          mac_arch="${mac_arch%.dmg}"
+          case "$mac_arch" in
+            arm64|x64) ;;
+            *) echo "Unsupported downloaded macOS artifact architecture: $mac_arch" >&2; exit 1 ;;
+          esac
+          npm run verify:release -- --platform mac --version "$VERSION" --arch "$mac_arch" --dir publish/macos
+          npm run verify:release -- --platform web --version "$VERSION" --arch any --dir publish/web
+
+      - name: Generate combined checksum manifest
+        run: |
+          set -euo pipefail
+          manifest_files=(publish/windows/SHA256SUMS.txt publish/macos/SHA256SUMS.txt publish/web/SHA256SUMS.txt)
+          duplicate_names="$(awk '{print $2}' "${manifest_files[@]}" | LC_ALL=C sort | uniq -d)"
+          if [[ -n "$duplicate_names" ]]; then
+            echo "Duplicate release asset names: $duplicate_names" >&2
+            exit 1
+          fi
+          cat "${manifest_files[@]}" | LC_ALL=C sort > publish/SHA256SUMS.txt
+
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          cat > publish/release-notes.md <<'EOF'
+          ## Mojian Story Planner release
+
+          Unsigned builds are published when signing secrets are not configured.
+          Verify downloaded files against `SHA256SUMS.txt` before installing.
+          EOF
+          gh release create "$GITHUB_REF_NAME" \
+            --title "$GITHUB_REF_NAME" \
+            --notes-file publish/release-notes.md \
+            publish/windows/*.exe \
+            publish/windows/*.zip \
+            publish/macos/*.dmg \
+            publish/macos/*.zip \
+            publish/web/*.zip \
+            publish/SHA256SUMS.txt
