@@ -4,8 +4,8 @@ import {
   lstat,
   open,
   readdir,
+  realpath,
   rename,
-  stat,
   unlink,
 } from 'node:fs/promises'
 import { basename, relative, resolve } from 'node:path'
@@ -18,7 +18,7 @@ const PLATFORM_CONFIG = new Map([
     {
       architectures: new Set(['arm64', 'x64']),
       extensions: ['dmg', 'zip'],
-      stagingDirectories: (arch) => ['mac', `mac-${arch}`],
+      stagingDirectories: (arch) => [arch === 'x64' ? 'mac' : 'mac-arm64'],
     },
   ],
   [
@@ -193,7 +193,8 @@ function sameFileState(left, right) {
     left.dev === right.dev &&
     left.ino === right.ino &&
     left.size === right.size &&
-    left.mtimeNs === right.mtimeNs
+    left.mtimeNs === right.mtimeNs &&
+    left.ctimeNs === right.ctimeNs
   )
 }
 
@@ -212,7 +213,27 @@ async function safeLstat(filePath, label) {
   }
 }
 
-export async function hashVerifiedArtifact(filePath, hooks = {}) {
+async function revalidateArtifactSession(session, phase) {
+  const currentHandleStats = await session.handle.stat({ bigint: true })
+  let currentPathStats
+  try {
+    currentPathStats = await safeLstat(session.filePath, session.label)
+  } catch (error) {
+    throw new Error(
+      `${session.label} was replaced or changed ${phase}: ${error.message}`,
+      { cause: error },
+    )
+  }
+  assertRegularSingleLink(currentHandleStats, session.label)
+  if (
+    !sameFileState(session.initialStats, currentHandleStats) ||
+    !sameFileState(currentHandleStats, currentPathStats)
+  ) {
+    throw new Error(`${session.label} was replaced or changed ${phase}`)
+  }
+}
+
+async function openArtifactSession(filePath, hooks = {}) {
   const label = `Artifact ${basename(filePath)}`
   const initialPathStats = await safeLstat(filePath, label)
   let handle
@@ -242,31 +263,60 @@ export async function hashVerifiedArtifact(filePath, hooks = {}) {
     }
 
     await hooks.afterRead?.()
-    const finalHandleStats = await handle.stat({ bigint: true })
-    let finalPathStats
-    try {
-      finalPathStats = await safeLstat(filePath, label)
-    } catch (error) {
-      throw new Error(
-        `${label} was replaced or changed during hashing: ${error.message}`,
-        { cause: error },
-      )
+    const session = {
+      digest: hash.digest('hex'),
+      filePath,
+      handle,
+      initialStats: initialHandleStats,
+      label,
     }
-    assertRegularSingleLink(finalHandleStats, label)
-    if (
-      !sameFileState(initialHandleStats, finalHandleStats) ||
-      !sameFileState(finalHandleStats, finalPathStats)
-    ) {
-      throw new Error(`${label} was replaced or changed during hashing`)
+    await revalidateArtifactSession(session, 'during hashing')
+    return session
+  } catch (error) {
+    if (handle) {
+      await handle.close().catch(() => {})
     }
-    return hash.digest('hex')
+    throw error
+  }
+}
+
+export async function hashVerifiedArtifact(filePath, hooks = {}) {
+  const session = await openArtifactSession(filePath, hooks)
+  try {
+    return session.digest
   } finally {
-    await handle?.close().catch(() => {})
+    await session.handle.close()
   }
 }
 
 export async function hashFile(filePath) {
   return hashVerifiedArtifact(filePath)
+}
+
+async function validateSingleLinkFile(filePath, label) {
+  const pathStats = await safeLstat(filePath, label)
+  let handle
+  try {
+    try {
+      handle = await open(filePath, constants.O_RDONLY | NO_FOLLOW)
+    } catch (error) {
+      throw new Error(
+        `Unable to open ${label} without following links: ${error.message}`,
+        { cause: error },
+      )
+    }
+    const handleStats = await handle.stat({ bigint: true })
+    const finalPathStats = await safeLstat(filePath, label)
+    assertRegularSingleLink(handleStats, label)
+    if (
+      !sameFileState(pathStats, handleStats) ||
+      !sameFileState(handleStats, finalPathStats)
+    ) {
+      throw new Error(`${label} was replaced or changed during validation`)
+    }
+  } finally {
+    await handle?.close().catch(() => {})
+  }
 }
 
 async function validateExistingManifest(manifestPath) {
@@ -278,14 +328,72 @@ async function validateExistingManifest(manifestPath) {
   }
 }
 
-async function writeChecksumManifest(directory, contents, hooks) {
+function comparablePath(filePath, platform = process.platform) {
+  const normalized = resolve(filePath)
+  return platform === 'win32' ? normalized.toLowerCase() : normalized
+}
+
+async function validateReleaseDirectory(directory, initialState) {
+  let directoryStats
+  let canonicalPath
+  try {
+    directoryStats = await lstat(directory, { bigint: true })
+    if (directoryStats.isSymbolicLink()) {
+      throw new Error(`Release directory is a symbolic link or junction: ${directory}`)
+    }
+    if (!directoryStats.isDirectory()) {
+      throw new Error(`Release path is not a directory: ${directory}`)
+    }
+    canonicalPath = await realpath(directory)
+  } catch (error) {
+    if (error instanceof Error && error.message.startsWith('Release ')) throw error
+    throw new Error(`Unable to validate release directory ${directory}: ${error.message}`, {
+      cause: error,
+    })
+  }
+  if (comparablePath(canonicalPath) !== comparablePath(directory)) {
+    throw new Error(
+      `Release directory resolves through a symbolic link, junction, or redirect: ${directory} -> ${canonicalPath}`,
+    )
+  }
+  if (
+    initialState &&
+    (initialState.dev !== directoryStats.dev || initialState.ino !== directoryStats.ino)
+  ) {
+    throw new Error(`Release directory was replaced during validation: ${directory}`)
+  }
+  return { dev: directoryStats.dev, ino: directoryStats.ino }
+}
+
+export async function syncContainingDirectory(
+  directory,
+  { openDirectory, platform = process.platform } = {},
+) {
+  if (platform === 'win32') return
+
+  const directoryHandle = await (openDirectory
+    ? openDirectory(directory)
+    : open(directory, constants.O_RDONLY | (constants.O_DIRECTORY ?? 0)))
+  try {
+    await directoryHandle.sync()
+  } finally {
+    await directoryHandle.close()
+  }
+}
+
+async function writeChecksumManifest(
+  directory,
+  contents,
+  { afterRename, beforeRename } = {},
+) {
   const manifestPath = resolveChildPath(directory, CHECKSUM_FILENAME)
   await validateExistingManifest(manifestPath)
 
   const tempName = `.${CHECKSUM_FILENAME}.${randomBytes(16).toString('hex')}.tmp`
   const tempPath = resolveChildPath(directory, tempName)
   let tempHandle
-  let published = false
+  let renamed = false
+  let completed = false
   try {
     tempHandle = await open(
       tempPath,
@@ -296,18 +404,32 @@ async function writeChecksumManifest(directory, contents, hooks) {
     await tempHandle.sync()
     await tempHandle.close()
     tempHandle = undefined
-    await hooks.beforeManifestRename?.()
+    await beforeRename?.()
     await rename(tempPath, manifestPath)
-    published = true
+    renamed = true
+    await afterRename?.()
+    await syncContainingDirectory(directory)
+    completed = true
   } finally {
     await tempHandle?.close().catch(() => {})
-    if (!published) {
+    if (!renamed) {
       await unlink(tempPath).catch((error) => {
         if (error?.code !== 'ENOENT') throw error
       })
+    } else if (!completed) {
+      await unlink(manifestPath).catch((error) => {
+        if (error?.code !== 'ENOENT') throw error
+      })
+      await syncContainingDirectory(directory)
     }
   }
   return manifestPath
+}
+
+async function revalidateAllArtifacts(sessions, phase) {
+  for (const session of sessions) {
+    await revalidateArtifactSession(session, phase)
+  }
 }
 
 export async function verifyReleaseArtifacts({
@@ -322,35 +444,74 @@ export async function verifyReleaseArtifacts({
     throw new Error(`Release directory must be a non-empty string; received ${JSON.stringify(dir)}`)
   }
   const directory = resolve(dir)
-  let directoryStats
-  try {
-    directoryStats = await stat(directory)
-  } catch (error) {
-    throw new Error(`Release directory does not exist: ${directory}`, { cause: error })
-  }
-  if (!directoryStats.isDirectory()) {
-    throw new Error(`Release path is not a directory: ${directory}`)
-  }
+  const directoryState = await validateReleaseDirectory(directory)
 
   const directoryEntries = await readdir(directory, { withFileTypes: true })
   const artifactNames = validateDirectoryEntries(directoryEntries, layout)
-  const lines = []
-  for (const artifactName of artifactNames) {
-    const digest = await hashVerifiedArtifact(
-      resolveChildPath(directory, artifactName),
-      hooks.afterArtifactRead
-        ? { afterRead: () => hooks.afterArtifactRead(artifactName) }
-        : undefined,
-    )
-    lines.push(`${digest}  ${artifactName}`)
+  const entryNames = new Set(directoryEntries.map((entry) => entry.name))
+  for (const blockmapName of layout.blockmapNames) {
+    if (entryNames.has(blockmapName)) {
+      await validateSingleLinkFile(
+        resolveChildPath(directory, blockmapName),
+        `Blockmap ${blockmapName}`,
+      )
+    }
   }
 
-  const checksumFile = await writeChecksumManifest(
-    directory,
-    `${lines.join('\n')}\n`,
-    hooks,
-  )
-  return { checksumFile, lines }
+  const sessions = []
+  const lines = []
+  let failed = false
+  try {
+    for (const artifactName of artifactNames) {
+      const session = await openArtifactSession(
+        resolveChildPath(directory, artifactName),
+        hooks.afterArtifactRead
+          ? { afterRead: () => hooks.afterArtifactRead(artifactName) }
+          : undefined,
+      )
+      sessions.push(session)
+      lines.push(`${session.digest}  ${artifactName}`)
+    }
+
+    await validateReleaseDirectory(directory, directoryState)
+    const checksumFile = await writeChecksumManifest(
+      directory,
+      `${lines.join('\n')}\n`,
+      {
+        afterRename: hooks.afterManifestRename,
+        beforeRename: async () => {
+          await hooks.beforeManifestRename?.()
+          await validateReleaseDirectory(directory, directoryState)
+          await revalidateAllArtifacts(sessions, 'before manifest publication')
+        },
+      },
+    )
+
+    try {
+      await validateReleaseDirectory(directory, directoryState)
+      await revalidateAllArtifacts(sessions, 'after manifest publication')
+    } catch (error) {
+      await unlink(checksumFile).catch((unlinkError) => {
+        if (unlinkError?.code !== 'ENOENT') throw unlinkError
+      })
+      await syncContainingDirectory(directory)
+      throw error
+    }
+    return { checksumFile, lines }
+  } catch (error) {
+    failed = true
+    throw error
+  } finally {
+    const closeResults = await Promise.allSettled(
+      sessions.map((session) => session.handle.close()),
+    )
+    const closeErrors = closeResults
+      .filter((result) => result.status === 'rejected')
+      .map((result) => result.reason)
+    if (!failed && closeErrors.length > 0) {
+      throw new AggregateError(closeErrors, 'Failed to close verified artifact handles')
+    }
+  }
 }
 
 export function parseArguments(argv) {

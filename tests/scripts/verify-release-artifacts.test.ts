@@ -8,6 +8,7 @@ import {
   rename,
   rm,
   symlink,
+  utimes,
   writeFile,
 } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -23,6 +24,13 @@ type ValidatorModule = {
     filePath: string,
     hooks?: { afterRead?: () => Promise<void> | void },
   ) => Promise<string>
+  syncContainingDirectory: (
+    directory: string,
+    options: {
+      openDirectory?: () => Promise<{ close: () => Promise<void>; sync: () => Promise<void> }>
+      platform?: string
+    },
+  ) => Promise<void>
   validateArtifactNames: (options: {
     arch: string
     entries: string[]
@@ -34,7 +42,11 @@ type ValidatorModule = {
     dir: string
     platform: Platform
     version: string
-    hooks?: { beforeManifestRename?: () => Promise<void> | void }
+    hooks?: {
+      afterArtifactRead?: (name: string) => Promise<void> | void
+      afterManifestRename?: () => Promise<void> | void
+      beforeManifestRename?: () => Promise<void> | void
+    }
   }) => Promise<{ checksumFile: string; lines: string[] }>
 }
 
@@ -412,6 +424,25 @@ describe('release artifact hardening', () => {
     ).rejects.toThrow(/replaced or changed during hashing/i)
   })
 
+  it('detects a same-size rewrite even when mtime is restored', async () => {
+    const validator = await loadValidator()
+    const directory = await createReleaseDirectory()
+    const artifactPath = join(directory, 'artifact.zip')
+    await writeFile(artifactPath, 'original')
+    const fixedTime = new Date('2020-01-01T00:00:00.000Z')
+    await utimes(artifactPath, fixedTime, fixedTime)
+
+    await expect(
+      validator.hashVerifiedArtifact(artifactPath, {
+        afterRead: async () => {
+          await new Promise((resolvePromise) => setTimeout(resolvePromise, 50))
+          await writeFile(artifactPath, 'tampered')
+          await utimes(artifactPath, fixedTime, fixedTime)
+        },
+      }),
+    ).rejects.toThrow(/replaced or changed during hashing/i)
+  })
+
   it('reports disappearance of an artifact path as a hashing replacement', async () => {
     const validator = await loadValidator()
     const directory = await createReleaseDirectory()
@@ -423,6 +454,36 @@ describe('release artifact hardening', () => {
         afterRead: () => rename(artifactPath, join(directory, 'original.zip')),
       }),
     ).rejects.toThrow(/replaced or changed during hashing/i)
+  })
+
+  it('detects the first artifact changing while the second artifact hashes', async () => {
+    const validator = await loadValidator()
+    const directory = await createReleaseDirectory()
+    const firstArtifact = join(
+      directory,
+      'mojian-story-planner-1.2.3-win-x64.exe',
+    )
+    await writeWindowsArtifacts(directory)
+
+    await expect(
+      validator.verifyReleaseArtifacts({
+        arch: 'x64',
+        dir: directory,
+        hooks: {
+          afterArtifactRead: async (name) => {
+            if (name.endsWith('.zip')) {
+              await rename(firstArtifact, `${firstArtifact}.original`)
+              await writeFile(firstArtifact, 'tampered!')
+            }
+          },
+        },
+        platform: 'win',
+        version: '1.2.3',
+      }),
+    ).rejects.toThrow(/replaced or changed.*mojian-story-planner.*\.exe|Artifact.*\.exe.*replaced or changed/i)
+    await expect(
+      readFile(join(directory, 'SHA256SUMS.txt'), 'utf8'),
+    ).rejects.toMatchObject({ code: 'ENOENT' })
   })
 
   it('rejects a symlink manifest without changing its target', async (context) => {
@@ -521,6 +582,78 @@ describe('release artifact hardening', () => {
     ).resolves.toMatch(/^[0-9a-f]{64}  mojian-story-planner-/)
   })
 
+  it('removes the published manifest if an artifact changes after rename', async () => {
+    const validator = await loadValidator()
+    const directory = await createReleaseDirectory()
+    const firstArtifact = join(
+      directory,
+      'mojian-story-planner-1.2.3-win-x64.exe',
+    )
+    await writeWindowsArtifacts(directory)
+
+    await expect(
+      validator.verifyReleaseArtifacts({
+        arch: 'x64',
+        dir: directory,
+        hooks: {
+          afterManifestRename: () => writeFile(firstArtifact, 'tampered!'),
+        },
+        platform: 'win',
+        version: '1.2.3',
+      }),
+    ).rejects.toThrow(/replaced or changed/i)
+    await expect(
+      readFile(join(directory, 'SHA256SUMS.txt'), 'utf8'),
+    ).rejects.toMatchObject({ code: 'ENOENT' })
+  })
+
+  it('rejects a hardlinked exact blockmap', async () => {
+    const validator = await loadValidator()
+    const directory = await createReleaseDirectory()
+    const externalDirectory = await createReleaseDirectory()
+    const externalBlockmap = join(externalDirectory, 'external.blockmap')
+    await writeWindowsArtifacts(directory)
+    await writeFile(externalBlockmap, 'blockmap')
+    await link(
+      externalBlockmap,
+      join(
+        directory,
+        'mojian-story-planner-1.2.3-win-x64.exe.blockmap',
+      ),
+    )
+
+    await expect(
+      validator.verifyReleaseArtifacts({
+        arch: 'x64',
+        dir: directory,
+        platform: 'win',
+        version: '1.2.3',
+      }),
+    ).rejects.toThrow(/blockmap.*single-link|hardlink/i)
+  })
+
+  it('rejects a Windows junction used as the release directory', async (context) => {
+    if (process.platform !== 'win32') {
+      context.skip()
+      return
+    }
+    const validator = await loadValidator()
+    const parent = await createReleaseDirectory()
+    const target = await createReleaseDirectory()
+    const junction = join(parent, 'release-junction')
+    await writeWindowsArtifacts(target)
+    await symlink(target, junction, 'junction')
+
+    await expect(
+      validator.verifyReleaseArtifacts({
+        arch: 'x64',
+        dir: junction,
+        platform: 'win',
+        version: '1.2.3',
+      }),
+    ).rejects.toThrow(/release directory.*symbolic link|junction|redirect/i)
+  })
+
   it.each(['unrelated', 'other-unpacked'])(
     'rejects unrelated staging directory %s',
     async (directoryName) => {
@@ -555,6 +688,63 @@ describe('release artifact hardening', () => {
         version: '1.2.3',
       }),
     ).toThrow(/Unexpected release entry.*other\.blockmap/)
+  })
+
+  it.each([
+    ['x64', 'mac-arm64'],
+    ['arm64', 'mac'],
+  ] as const)(
+    'rejects mac %s artifacts with cross-label staging directory %s',
+    async (arch, stagingDirectory) => {
+      const validator = await loadValidator()
+
+      expect(() =>
+        validator.validateArtifactNames({
+          arch,
+          entries: [
+            `mojian-story-planner-1.2.3-mac-${arch}.dmg`,
+            `mojian-story-planner-1.2.3-mac-${arch}.zip`,
+            stagingDirectory,
+          ],
+          platform: 'mac',
+          version: '1.2.3',
+        }),
+      ).toThrow(/Unexpected release entry/)
+    },
+  )
+
+  it('syncs and closes the containing directory on POSIX', async () => {
+    const validator = await loadValidator()
+    const calls: string[] = []
+
+    await validator.syncContainingDirectory('/release', {
+      openDirectory: async () => ({
+        close: async () => {
+          calls.push('close')
+        },
+        sync: async () => {
+          calls.push('sync')
+        },
+      }),
+      platform: 'linux',
+    })
+
+    expect(calls).toEqual(['sync', 'close'])
+  })
+
+  it('explicitly skips directory fsync on Windows', async () => {
+    const validator = await loadValidator()
+    let opened = false
+
+    await validator.syncContainingDirectory('C:\\release', {
+      openDirectory: async () => {
+        opened = true
+        throw new Error('must not open')
+      },
+      platform: 'win32',
+    })
+
+    expect(opened).toBe(false)
   })
 
   it('rejects inherited platform property names with an actionable error', async () => {
