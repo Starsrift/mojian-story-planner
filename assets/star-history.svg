@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="960" height="480" viewBox="0 0 960 480" role="img" aria-labelledby="title desc">
   <title id="title">Starsrift/mojian-story-planner Star History</title>
-  <desc id="desc">0 cumulative GitHub stars as of 2026-07-15.</desc>
+  <desc id="desc">0 cumulative GitHub stars as of 2026-07-16.</desc>
   <rect width="960" height="480" rx="18" fill="#faf8f3"/>
   <text x="64" y="58" fill="#2b2723" font-family="system-ui, sans-serif" font-size="24" font-weight="700">Star History</text>
   <text x="64" y="84" fill="#8a8378" font-family="system-ui, sans-serif" font-size="13">Starsrift/mojian-story-planner</text>
@@ -12,12 +12,12 @@
   <line x1="86" y1="171.2" x2="910" y2="171.2" stroke="#e3dccd"/><text x="72" y="175.2" text-anchor="end" fill="#8a8378" font-family="system-ui, sans-serif" font-size="11">4</text>
   <line x1="86" y1="112" x2="910" y2="112" stroke="#e3dccd"/><text x="72" y="116" text-anchor="end" fill="#8a8378" font-family="system-ui, sans-serif" font-size="11">5</text>
   <line x1="86" y1="112" x2="86" y2="408" stroke="#eee8dc"/><text x="86" y="432" text-anchor="middle" fill="#8a8378" font-family="system-ui, sans-serif" font-size="11">2026-07-12</text>
-  <line x1="250.79999722806213" y1="112" x2="250.79999722806213" y2="408" stroke="#eee8dc"/><text x="250.79999722806213" y="432" text-anchor="middle" fill="#8a8378" font-family="system-ui, sans-serif" font-size="11">2026-07-13</text>
-  <line x1="415.5999979210466" y1="112" x2="415.5999979210466" y2="408" stroke="#eee8dc"/><text x="415.5999979210466" y="432" text-anchor="middle" fill="#8a8378" font-family="system-ui, sans-serif" font-size="11">2026-07-13</text>
-  <line x1="580.3999986140311" y1="112" x2="580.3999986140311" y2="408" stroke="#eee8dc"/><text x="580.3999986140311" y="432" text-anchor="middle" fill="#8a8378" font-family="system-ui, sans-serif" font-size="11">2026-07-14</text>
-  <line x1="745.1999993070156" y1="112" x2="745.1999993070156" y2="408" stroke="#eee8dc"/><text x="745.1999993070156" y="432" text-anchor="middle" fill="#8a8378" font-family="system-ui, sans-serif" font-size="11">2026-07-14</text>
-  <line x1="910" y1="112" x2="910" y2="408" stroke="#eee8dc"/><text x="910" y="432" text-anchor="middle" fill="#8a8378" font-family="system-ui, sans-serif" font-size="11">2026-07-15</text>
+  <line x1="250.79999890895206" y1="112" x2="250.79999890895206" y2="408" stroke="#eee8dc"/><text x="250.79999890895206" y="432" text-anchor="middle" fill="#8a8378" font-family="system-ui, sans-serif" font-size="11">2026-07-13</text>
+  <line x1="415.5999978179041" y1="112" x2="415.5999978179041" y2="408" stroke="#eee8dc"/><text x="415.5999978179041" y="432" text-anchor="middle" fill="#8a8378" font-family="system-ui, sans-serif" font-size="11">2026-07-14</text>
+  <line x1="580.3999994544761" y1="112" x2="580.3999994544761" y2="408" stroke="#eee8dc"/><text x="580.3999994544761" y="432" text-anchor="middle" fill="#8a8378" font-family="system-ui, sans-serif" font-size="11">2026-07-14</text>
+  <line x1="745.1999983634281" y1="112" x2="745.1999983634281" y2="408" stroke="#eee8dc"/><text x="745.1999983634281" y="432" text-anchor="middle" fill="#8a8378" font-family="system-ui, sans-serif" font-size="11">2026-07-15</text>
+  <line x1="910" y1="112" x2="910" y2="408" stroke="#eee8dc"/><text x="910" y="432" text-anchor="middle" fill="#8a8378" font-family="system-ui, sans-serif" font-size="11">2026-07-16</text>
   <path d="M86.00 408.00 L910.00 408.00" fill="none" stroke="#8b5e3c" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
   <circle cx="910" cy="408" r="5" fill="#c4683f" stroke="#faf8f3" stroke-width="3"/>
-  <text x="480" y="460" text-anchor="middle" fill="#8a8378" font-family="system-ui, sans-serif" font-size="11">Updated 2026-07-15 by GitHub Actions</text>
+  <text x="480" y="460" text-anchor="middle" fill="#8a8378" font-family="system-ui, sans-serif" font-size="11">Updated 2026-07-16 by GitHub Actions</text>
 </svg>
